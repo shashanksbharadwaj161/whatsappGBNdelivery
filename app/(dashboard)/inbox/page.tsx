@@ -1,15 +1,10 @@
-import { PageHeader } from "@/components/layout/PageHeader";
-import { Card, CardContent } from "@/components/ui/Card";
+import { MessageCircle } from "lucide-react";
 
-export default function InboxPage() {
+export default function InboxIndexPage() {
   return (
-    <div>
-      <PageHeader title="Inbox" description="WhatsApp conversations with customers." />
-      <Card>
-        <CardContent className="text-sm text-ink-muted">
-          The WhatsApp inbox is wired up in Phase 2.
-        </CardContent>
-      </Card>
+    <div className="flex h-full flex-col items-center justify-center gap-2 text-ink-muted">
+      <MessageCircle size={32} className="opacity-50" />
+      <p className="text-sm">Select a conversation to view the chat.</p>
     </div>
   );
 }
