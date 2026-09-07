@@ -1,7 +1,8 @@
 import Link from "next/link";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, Truck } from "lucide-react";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { Card, CardContent } from "@/components/ui/Card";
+import { Button } from "@/components/ui/Button";
 import { RouteStopList, type RouteStopView } from "@/components/routes/RouteStopList";
 import { RouteMap, type RouteMapStop } from "@/components/routes/RouteMap";
 import { getRouteDetail } from "@/lib/services/routes";
@@ -45,6 +46,13 @@ export default async function RouteDetailPage({
       <PageHeader
         title={`Route · ${route.date.toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "long" })}`}
         description={route.revisionNumber > 1 ? `Revision ${route.revisionNumber}` : undefined}
+        actions={
+          <Link href={`/driver/${route.id}`}>
+            <Button variant="outline">
+              <Truck size={16} /> Open driver view
+            </Button>
+          </Link>
+        }
       />
 
       {route.usedDevFallback && (

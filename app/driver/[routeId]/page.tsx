@@ -1,21 +1,14 @@
-import { Card, CardContent } from "@/components/ui/Card";
 import { DriverRouteView, type DriverStopView } from "@/components/driver/DriverRouteView";
-import { getDriverRouteForDate } from "@/lib/services/driver";
+import { getRouteDetail } from "@/lib/services/routes";
 import { formatBusinessTime } from "@/lib/tz";
 
-export default async function DriverHomePage() {
-  const route = await getDriverRouteForDate();
-
-  if (!route) {
-    return (
-      <Card>
-        <CardContent className="text-center text-sm text-ink-muted">
-          No route has been planned for today yet — check back once the admin generates one from the
-          Routes tab.
-        </CardContent>
-      </Card>
-    );
-  }
+export default async function DriverRoutePage({
+  params,
+}: {
+  params: Promise<{ routeId: string }>;
+}) {
+  const { routeId } = await params;
+  const route = await getRouteDetail(routeId);
 
   const stops: DriverStopView[] = route.stops.map((stop) => ({
     id: stop.id,
