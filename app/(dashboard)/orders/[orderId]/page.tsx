@@ -75,9 +75,11 @@ export default async function OrderDetailPage({
                 ? `${order.address.latitude?.toFixed(6)}, ${order.address.longitude?.toFixed(6)}`
                 : "Not resolved yet"}
             </Row>
-            {order.routeStop && (
+            {order.activeRouteStop && (
               <Row label="Route">
-                Stop #{order.routeStop.stopNumber} on route {order.routeStop.routeId.slice(0, 8)}
+                <Link href={`/routes/${order.activeRouteStop.routeId}`} className="text-primary hover:underline">
+                  Stop #{order.activeRouteStop.stopNumber} on today&rsquo;s route
+                </Link>
               </Row>
             )}
           </CardContent>

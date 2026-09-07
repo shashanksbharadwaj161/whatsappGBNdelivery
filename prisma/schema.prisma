@@ -301,8 +301,13 @@ model Order {
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
-  routeStop RouteStop?
-  payments  Payment[]
+  // A list, not a to-one relation: route re-optimization creates a new
+  // RouteStop row per revision, carrying settled stops forward into the
+  // next Route. Only one row should ever belong to an active
+  // (PLANNED/IN_PROGRESS) route at a time — enforced in application
+  // code (lib/services/routes.ts), not by a DB constraint.
+  routeStops RouteStop[]
+  payments   Payment[]
 
   @@unique([subscriptionId, deliveryDate])
   @@index([deliveryDate, status])
@@ -377,7 +382,7 @@ model RouteStop {
   id      String @id @default(uuid())
   routeId String
   route   Route  @relation(fields: [routeId], references: [id])
-  orderId String @unique
+  orderId String
   order   Order  @relation(fields: [orderId], references: [id])
 
   stopNumber Int
@@ -403,6 +408,7 @@ model RouteStop {
 
   @@unique([routeId, stopNumber])
   @@index([routeId, status])
+  @@index([orderId])
 }
 
 model Payment {

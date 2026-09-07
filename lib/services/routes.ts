@@ -1,8 +1,9 @@
 import { db } from "@/lib/db";
+import type { Prisma } from "@prisma/client";
 import { recordAudit } from "@/lib/audit";
-import { optimizeRoute, type RouteWaypoint } from "@/lib/maps/routes";
+import { optimizeRoute, type RouteWaypoint, type OptimizeRouteResult } from "@/lib/maps/routes";
 import { hasCoordinates } from "@/lib/services/addresses";
-import { ValidationError, NotFoundError } from "@/lib/errors";
+import { ValidationError, NotFoundError, ConflictError } from "@/lib/errors";
 import { businessDateOnlyToDate } from "@/lib/tz";
 
 export interface CreateRouteInput {
@@ -17,6 +18,37 @@ export interface CreateRouteInput {
 function milkQuantityLabel(order: { milkSize: string; quantity: number; customQuantityLiters: number | null }) {
   const unit = order.milkSize === "ML500" ? "500 ml" : order.milkSize === "L1" ? "1 Litre" : `${order.customQuantityLiters} L`;
   return `${order.quantity}× ${unit}`;
+}
+
+type OrderWithRelations = Prisma.OrderGetPayload<{ include: { address: true; customer: true } }>;
+
+/** Inserts RouteStop rows (with snapshots) for an optimize result, continuing stopNumber from startingStopNumber. */
+async function insertRouteStops(
+  tx: Prisma.TransactionClient,
+  routeId: string,
+  result: OptimizeRouteResult,
+  ordersById: Map<string, OrderWithRelations>,
+  startingStopNumber: number
+) {
+  for (const [i, stop] of result.stops.entries()) {
+    const order = ordersById.get(stop.id)!;
+    await tx.routeStop.create({
+      data: {
+        routeId,
+        orderId: order.id,
+        stopNumber: startingStopNumber + i,
+        customerNameSnapshot: order.customer.name,
+        addressTextSnapshot: order.address.formattedAddress,
+        latitudeSnapshot: order.address.latitude!,
+        longitudeSnapshot: order.address.longitude!,
+        quantitySnapshot: milkQuantityLabel(order),
+        estimatedArrival: stop.estimatedArrival,
+        plannedDistanceFromPreviousKm: stop.distanceFromPreviousKm,
+        plannedDurationFromPreviousMinutes: Math.round(stop.durationFromPreviousMinutes),
+        status: "PENDING",
+      },
+    });
+  }
 }
 
 export async function createOptimizedRoute(input: CreateRouteInput) {
@@ -74,25 +106,7 @@ export async function createOptimizedRoute(input: CreateRouteInput) {
       },
     });
 
-    for (const stop of result.stops) {
-      const order = ordersById.get(stop.id)!;
-      await tx.routeStop.create({
-        data: {
-          routeId: createdRoute.id,
-          orderId: order.id,
-          stopNumber: stop.sequenceIndex + 1,
-          customerNameSnapshot: order.customer.name,
-          addressTextSnapshot: order.address.formattedAddress,
-          latitudeSnapshot: order.address.latitude!,
-          longitudeSnapshot: order.address.longitude!,
-          quantitySnapshot: milkQuantityLabel(order),
-          estimatedArrival: stop.estimatedArrival,
-          plannedDistanceFromPreviousKm: stop.distanceFromPreviousKm,
-          plannedDurationFromPreviousMinutes: Math.round(stop.durationFromPreviousMinutes),
-          status: "PENDING",
-        },
-      });
-    }
+    await insertRouteStops(tx, createdRoute.id, result, ordersById, 1);
 
     return createdRoute;
   });
@@ -123,6 +137,143 @@ export async function getRouteDetail(routeId: string) {
   return route;
 }
 
+/**
+ * "Re-optimize remaining route" — creates a new Route revision. Stops
+ * already DELIVERED/SKIPPED/UNAVAILABLE carry over unchanged (their
+ * history must not move); the still-PENDING stops plus any newly added
+ * orders are re-optimized together, starting from wherever the driver's
+ * last completed stop was (or the original depot if none yet).
+ */
+export async function reoptimizeRoute(
+  routeId: string,
+  additionalOrderIds: string[],
+  actorUserId?: string
+) {
+  const current = await getRouteDetail(routeId);
+  if (current.status !== "PLANNED" && current.status !== "IN_PROGRESS") {
+    throw new ConflictError(`Route is already ${current.status.toLowerCase()} — nothing to re-optimize`);
+  }
+
+  const settledStops = current.stops.filter((s) => s.status === "DELIVERED" || s.status === "SKIPPED" || s.status === "UNAVAILABLE");
+  const pendingStops = current.stops.filter((s) => s.status === "PENDING" || s.status === "EN_ROUTE");
+  const pendingOrderIds = pendingStops.map((s) => s.orderId);
+
+  const combinedOrderIds = [...new Set([...pendingOrderIds, ...additionalOrderIds])];
+  if (combinedOrderIds.length === 0) {
+    throw new ValidationError("No pending or additional orders to re-optimize");
+  }
+
+  const orders = await db.order.findMany({
+    where: { id: { in: combinedOrderIds } },
+    include: { address: true, customer: true },
+  });
+  if (orders.length !== combinedOrderIds.length) {
+    throw new NotFoundError("One or more orders could not be found");
+  }
+
+  // Orders already on this route's pending stops are legitimately
+  // OUT_FOR_DELIVERY once the route has started — only newly-added
+  // orders need to still be CONFIRMED (i.e. not yet on any route).
+  const pendingOrderIdSet = new Set(pendingOrderIds);
+  const invalid = orders.filter((o) => {
+    if (!hasCoordinates(o.address)) return true;
+    if (pendingOrderIdSet.has(o.id)) return o.status !== "CONFIRMED" && o.status !== "OUT_FOR_DELIVERY";
+    return o.status !== "CONFIRMED";
+  });
+  if (invalid.length > 0) {
+    throw new ValidationError(
+      `${invalid.length} order(s) are not confirmed or have no resolved address — remove them and try again`
+    );
+  }
+
+  const alreadyElsewhere = await db.routeStop.findFirst({
+    where: {
+      orderId: { in: additionalOrderIds },
+      route: { status: { in: ["PLANNED", "IN_PROGRESS"] }, id: { not: routeId } },
+    },
+  });
+  if (alreadyElsewhere) {
+    throw new ValidationError("One or more added orders are already on another active route");
+  }
+
+  // Re-optimize from the last completed stop's location, or the
+  // original depot if the driver hasn't delivered anything yet.
+  const lastSettled = [...settledStops].reverse().find((s) => s.status === "DELIVERED");
+  const origin = lastSettled
+    ? { lat: lastSettled.latitudeSnapshot, lng: lastSettled.longitudeSnapshot }
+    : { lat: current.startLocationLat, lng: current.startLocationLng };
+
+  const waypoints: RouteWaypoint[] = orders.map((o) => ({ id: o.id, lat: o.address.latitude!, lng: o.address.longitude! }));
+  const result = await optimizeRoute(origin, waypoints, new Date());
+  const ordersById = new Map(orders.map((o) => [o.id, o]));
+
+  const newRoute = await db.$transaction(async (tx) => {
+    const created = await tx.route.create({
+      data: {
+        date: current.date,
+        driverId: current.driverId,
+        startLocationLat: current.startLocationLat,
+        startLocationLng: current.startLocationLng,
+        startedAt: current.startedAt,
+        plannedDistanceKm: result.totalDistanceKm,
+        plannedDurationMinutes: Math.round(result.totalDurationMinutes),
+        status: current.status,
+        usedDevFallback: result.usedDevFallback,
+        revisionNumber: current.revisionNumber + 1,
+        previousRouteId: current.id,
+        createdByUserId: actorUserId,
+      },
+    });
+
+    for (const [i, settled] of settledStops.entries()) {
+      await tx.routeStop.create({
+        data: {
+          routeId: created.id,
+          orderId: settled.orderId,
+          stopNumber: i + 1,
+          customerNameSnapshot: settled.customerNameSnapshot,
+          addressTextSnapshot: settled.addressTextSnapshot,
+          latitudeSnapshot: settled.latitudeSnapshot,
+          longitudeSnapshot: settled.longitudeSnapshot,
+          quantitySnapshot: settled.quantitySnapshot,
+          estimatedArrival: settled.estimatedArrival,
+          actualArrival: settled.actualArrival,
+          deliveredAt: settled.deliveredAt,
+          plannedDistanceFromPreviousKm: settled.plannedDistanceFromPreviousKm,
+          plannedDurationFromPreviousMinutes: settled.plannedDurationFromPreviousMinutes,
+          status: settled.status,
+          failureReason: settled.failureReason,
+        },
+      });
+    }
+
+    await insertRouteStops(tx, created.id, result, ordersById, settledStops.length + 1);
+
+    if (created.status === "IN_PROGRESS") {
+      await tx.order.updateMany({
+        where: { id: { in: additionalOrderIds } },
+        data: { status: "OUT_FOR_DELIVERY" },
+      });
+    }
+
+    // Supersede the old plan — its completed-stop history lives on in
+    // the new revision's carried-over rows.
+    await tx.route.update({ where: { id: current.id }, data: { status: "CANCELLED" } });
+
+    return created;
+  });
+
+  await recordAudit({
+    action: "ROUTE_REOPTIMIZED",
+    entityType: "Route",
+    entityId: newRoute.id,
+    actorUserId,
+    metadata: { previousRouteId: current.id, carriedOverStops: settledStops.length, newStops: result.stops.length },
+  });
+
+  return getRouteDetail(newRoute.id);
+}
+
 export async function getActiveRouteForDate(dateString: string) {
   return db.route.findFirst({
     where: { date: businessDateOnlyToDate(dateString), status: { in: ["PLANNED", "IN_PROGRESS"] } },
@@ -142,7 +293,7 @@ export async function listRoutableOrdersForDate(dateString: string) {
     where: {
       deliveryDate: businessDateOnlyToDate(dateString),
       status: "CONFIRMED",
-      routeStop: null,
+      routeStops: { none: { route: { status: { in: ["PLANNED", "IN_PROGRESS"] } } } },
       address: { latitude: { not: null }, longitude: { not: null } },
     },
     include: { customer: true, address: true },

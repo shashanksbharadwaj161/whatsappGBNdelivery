@@ -62,7 +62,7 @@ export async function getCustomerDetail(customerId: string) {
       orders: {
         orderBy: { deliveryDate: "desc" },
         take: 50,
-        include: { address: true, routeStop: true },
+        include: { address: true },
       },
     },
   });

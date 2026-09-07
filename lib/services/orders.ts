@@ -238,7 +238,7 @@ export async function listOrders(filter: ListOrdersFilter = {}) {
           }
         : undefined,
     },
-    include: { customer: true, address: true, routeStop: true },
+    include: { customer: true, address: true },
     orderBy: [{ deliveryDate: "asc" }, { createdAt: "asc" }],
   });
 }
@@ -246,8 +246,19 @@ export async function listOrders(filter: ListOrdersFilter = {}) {
 export async function getOrderDetail(orderId: string) {
   const order = await db.order.findUnique({
     where: { id: orderId },
-    include: { customer: true, address: true, routeStop: { include: { route: true } }, payments: true },
+    include: {
+      customer: true,
+      address: true,
+      payments: true,
+      routeStops: { include: { route: true }, orderBy: { createdAt: "desc" } },
+    },
   });
   if (!order) throw new NotFoundError("Order not found");
-  return order;
+
+  // The stop on whichever route is currently active, if any — older
+  // stops from superseded (CANCELLED) revisions are history, not "the"
+  // current route for this order.
+  const activeRouteStop = order.routeStops.find((s) => s.route.status === "PLANNED" || s.route.status === "IN_PROGRESS");
+
+  return { ...order, activeRouteStop };
 }

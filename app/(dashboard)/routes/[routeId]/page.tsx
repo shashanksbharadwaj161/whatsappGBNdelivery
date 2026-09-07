@@ -5,8 +5,11 @@ import { Card, CardContent } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { RouteStopList, type RouteStopView } from "@/components/routes/RouteStopList";
 import { RouteMap, type RouteMapStop } from "@/components/routes/RouteMap";
-import { getRouteDetail } from "@/lib/services/routes";
-import { formatBusinessTime } from "@/lib/tz";
+import { ReoptimizePanel } from "@/components/routes/ReoptimizePanel";
+import type { RoutableOrder } from "@/components/routes/RouteOptimizerPanel";
+import { getRouteDetail, listRoutableOrdersForDate } from "@/lib/services/routes";
+import { formatBusinessTime, dateToBusinessDateString } from "@/lib/tz";
+import { MILK_SIZE_LABEL } from "@/lib/statusStyles";
 
 export default async function RouteDetailPage({
   params,
@@ -37,6 +40,18 @@ export default async function RouteDetailPage({
   }));
 
   const lastStop = route.stops[route.stops.length - 1];
+  const canReoptimize = route.status === "PLANNED" || route.status === "IN_PROGRESS";
+  const routedOrderIds = new Set(route.stops.map((s) => s.orderId));
+  const availableOrders: RoutableOrder[] = canReoptimize
+    ? (await listRoutableOrdersForDate(dateToBusinessDateString(route.date)))
+        .filter((o) => !routedOrderIds.has(o.id))
+        .map((o) => ({
+          id: o.id,
+          customerName: o.customer.name,
+          area: o.address.area,
+          quantity: `${o.quantity}× ${MILK_SIZE_LABEL[o.milkSize] ?? o.milkSize}`,
+        }))
+    : [];
 
   return (
     <div>
@@ -85,6 +100,12 @@ export default async function RouteDetailPage({
           </CardContent>
         </Card>
       </div>
+
+      {canReoptimize && (
+        <div className="mt-6">
+          <ReoptimizePanel routeId={route.id} availableOrders={availableOrders} />
+        </div>
+      )}
     </div>
   );
 }
