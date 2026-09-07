@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { Prisma } from "@prisma/client";
 import { AppError } from "@/lib/errors";
 import { AuthError } from "@/lib/auth/guard";
 
@@ -24,6 +25,16 @@ export function withApiHandler<Args extends unknown[]>(
         return NextResponse.json(
           { error: { code: error.code, message: error.message } },
           { status: error.status }
+        );
+      }
+      // Backstop for any unique-constraint violation that doesn't have
+      // an explicit pre-check in its service function (e.g. a race
+      // condition, or a field we haven't special-cased) — a friendly
+      // "already in use" beats a generic 500.
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+        return NextResponse.json(
+          { error: { code: "CONFLICT", message: "That value is already in use." } },
+          { status: 409 }
         );
       }
       console.error("Unhandled API error:", error);

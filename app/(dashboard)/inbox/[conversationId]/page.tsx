@@ -3,6 +3,7 @@ import { ConversationActions } from "@/components/inbox/ConversationActions";
 import { ReplyBox } from "@/components/inbox/ReplyBox";
 import { isWithinSessionWindow } from "@/lib/whatsapp/session";
 import { cn } from "@/lib/utils";
+import { getOrNotFound } from "@/lib/notFoundGuard";
 
 export default async function ConversationThreadPage({
   params,
@@ -10,7 +11,7 @@ export default async function ConversationThreadPage({
   params: Promise<{ conversationId: string }>;
 }) {
   const { conversationId } = await params;
-  const conversation = await getConversationDetail(conversationId);
+  const conversation = await getOrNotFound(() => getConversationDetail(conversationId));
   await markConversationRead(conversationId);
 
   const lastInbound = [...conversation.messages].reverse().find((m) => m.direction === "INBOUND");

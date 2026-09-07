@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/Badge";
 import { getCustomerDetail } from "@/lib/services/customers";
 import { ORDER_STATUS_STYLE, MILK_SIZE_LABEL } from "@/lib/statusStyles";
 import { SubscriptionsPanel, type SubscriptionView } from "@/components/customers/SubscriptionsPanel";
+import { getOrNotFound } from "@/lib/notFoundGuard";
 
 export default async function CustomerDetailPage({
   params,
@@ -13,7 +14,7 @@ export default async function CustomerDetailPage({
   params: Promise<{ customerId: string }>;
 }) {
   const { customerId } = await params;
-  const { customer, stats } = await getCustomerDetail(customerId);
+  const { customer, stats } = await getOrNotFound(() => getCustomerDetail(customerId));
 
   return (
     <div>

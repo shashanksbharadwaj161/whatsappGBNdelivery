@@ -7,6 +7,7 @@ import { OrderActions } from "@/components/orders/OrderActions";
 import { getOrderDetail } from "@/lib/services/orders";
 import { hasCoordinates } from "@/lib/services/addresses";
 import { ORDER_STATUS_STYLE, PAYMENT_STATUS_STYLE, MILK_SIZE_LABEL } from "@/lib/statusStyles";
+import { getOrNotFound } from "@/lib/notFoundGuard";
 
 export default async function OrderDetailPage({
   params,
@@ -14,7 +15,7 @@ export default async function OrderDetailPage({
   params: Promise<{ orderId: string }>;
 }) {
   const { orderId } = await params;
-  const order = await getOrderDetail(orderId);
+  const order = await getOrNotFound(() => getOrderDetail(orderId));
   const statusStyle = ORDER_STATUS_STYLE[order.status];
   const paymentStyle = PAYMENT_STATUS_STYLE[order.paymentStatus];
 

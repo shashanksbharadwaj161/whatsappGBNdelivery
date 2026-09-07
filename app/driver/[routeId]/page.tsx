@@ -1,6 +1,7 @@
 import { DriverRouteView, type DriverStopView } from "@/components/driver/DriverRouteView";
 import { getRouteDetail } from "@/lib/services/routes";
 import { formatBusinessTime } from "@/lib/tz";
+import { getOrNotFound } from "@/lib/notFoundGuard";
 
 export default async function DriverRoutePage({
   params,
@@ -8,7 +9,7 @@ export default async function DriverRoutePage({
   params: Promise<{ routeId: string }>;
 }) {
   const { routeId } = await params;
-  const route = await getRouteDetail(routeId);
+  const route = await getOrNotFound(() => getRouteDetail(routeId));
 
   const stops: DriverStopView[] = route.stops.map((stop) => ({
     id: stop.id,

@@ -1,6 +1,6 @@
 import { db } from "@/lib/db";
 import { recordAudit } from "@/lib/audit";
-import { NotFoundError } from "@/lib/errors";
+import { NotFoundError, ConflictError } from "@/lib/errors";
 import { normalizePhoneToE164 } from "@/lib/phone";
 
 export interface CreateCustomerInput {
@@ -104,6 +104,14 @@ export async function updateCustomer(customerId: string, input: UpdateCustomerIn
   const existing = await db.customer.findUnique({ where: { id: customerId } });
   if (!existing) throw new NotFoundError("Customer not found");
 
+  const normalizedPhone = input.phone ? normalizePhoneToE164(input.phone) : undefined;
+  if (normalizedPhone && normalizedPhone !== existing.phone) {
+    const phoneTaken = await db.customer.findUnique({ where: { phone: normalizedPhone } });
+    if (phoneTaken) {
+      throw new ConflictError("This phone number is already in use by another customer");
+    }
+  }
+
   const changedFields = Object.keys(input).filter(
     (k) => k !== "actorUserId" && (input as Record<string, unknown>)[k] !== undefined
   );
@@ -112,7 +120,7 @@ export async function updateCustomer(customerId: string, input: UpdateCustomerIn
     where: { id: customerId },
     data: {
       name: input.name,
-      phone: input.phone ? normalizePhoneToE164(input.phone) : undefined,
+      phone: normalizedPhone,
       alternatePhone: input.alternatePhone,
       notes: input.notes,
       isActive: input.isActive,

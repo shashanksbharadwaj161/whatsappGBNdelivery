@@ -10,6 +10,7 @@ import type { RoutableOrder } from "@/components/routes/RouteOptimizerPanel";
 import { getRouteDetail, listRoutableOrdersForDate } from "@/lib/services/routes";
 import { formatBusinessTime, dateToBusinessDateString } from "@/lib/tz";
 import { MILK_SIZE_LABEL } from "@/lib/statusStyles";
+import { getOrNotFound } from "@/lib/notFoundGuard";
 
 export default async function RouteDetailPage({
   params,
@@ -17,7 +18,7 @@ export default async function RouteDetailPage({
   params: Promise<{ routeId: string }>;
 }) {
   const { routeId } = await params;
-  const route = await getRouteDetail(routeId);
+  const route = await getOrNotFound(() => getRouteDetail(routeId));
 
   const stopViews: RouteStopView[] = route.stops.map((stop) => ({
     id: stop.id,
