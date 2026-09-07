@@ -1,0 +1,444 @@
+datasource db {
+  provider = "postgresql"
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// ---------- Enums ----------
+
+enum UserRole {
+  OWNER
+  DRIVER
+}
+
+enum AddressSource {
+  TYPED
+  MAPS_URL
+  WHATSAPP_LOCATION
+  MANUAL_PIN
+}
+
+enum MilkSize {
+  ML500
+  L1
+  CUSTOM
+}
+
+enum OrderType {
+  ONE_TIME
+  TRIAL
+  DAILY_SUBSCRIPTION
+}
+
+enum OrderSource {
+  WHATSAPP
+  MANUAL
+  SUBSCRIPTION
+  WEBSITE
+}
+
+enum DeliveryWindow {
+  MORNING
+  CUSTOM
+}
+
+enum PaymentStatus {
+  PENDING
+  PAID
+  CASH
+  UPI
+}
+
+enum OrderStatus {
+  PENDING
+  CONFIRMED
+  OUT_FOR_DELIVERY
+  DELIVERED
+  CANCELLED
+}
+
+enum SubscriptionFrequency {
+  DAILY
+  ALTERNATE_DAYS
+  CUSTOM
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  PAUSED
+  CANCELLED
+  COMPLETED
+}
+
+enum RouteStatus {
+  PLANNED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+enum RouteStopStatus {
+  PENDING
+  EN_ROUTE
+  DELIVERED
+  SKIPPED
+  UNAVAILABLE
+}
+
+enum PaymentMethod {
+  CASH
+  UPI
+  CARD
+  BANK_TRANSFER
+  OTHER
+}
+
+enum PaymentRecordStatus {
+  PENDING
+  COMPLETED
+  FAILED
+  REFUNDED
+}
+
+enum MessageDirection {
+  INBOUND
+  OUTBOUND
+}
+
+enum MessageType {
+  TEXT
+  LOCATION
+  IMAGE
+  DOCUMENT
+  AUDIO
+  VIDEO
+  STICKER
+  TEMPLATE
+  UNKNOWN
+}
+
+enum MessageStatus {
+  SENT
+  DELIVERED
+  READ
+  FAILED
+  PENDING
+}
+
+enum ConversationStatus {
+  OPEN
+  LEAD
+  ARCHIVED
+}
+
+enum AuditAction {
+  ORDER_CREATED
+  ORDER_EDITED
+  ORDER_CANCELLED
+  ORDER_CONFIRMED
+  CUSTOMER_CREATED
+  CUSTOMER_EDITED
+  ROUTE_CREATED
+  ROUTE_REOPTIMIZED
+  ROUTE_FAILED
+  DELIVERY_COMPLETED
+  DELIVERY_SKIPPED
+  DELIVERY_UNAVAILABLE
+  WHATSAPP_MESSAGE_FAILED
+  SUBSCRIPTION_CREATED
+  SUBSCRIPTION_PAUSED
+  SUBSCRIPTION_RESUMED
+  SUBSCRIPTION_CANCELLED
+  SUBSCRIPTION_SKIPPED
+}
+
+// ---------- Auth-linked ----------
+
+model Profile {
+  id        String   @id // == supabase auth.users.id
+  fullName  String
+  phone     String?
+  role      UserRole @default(OWNER)
+  createdAt DateTime @default(now())
+
+  routesAsDriver Route[]           @relation("RouteDriver")
+  ordersCreated  Order[]           @relation("OrderCreatedBy")
+  routesCreated  Route[]           @relation("RouteCreatedBy")
+  messagesSent   WhatsappMessage[] @relation("MessageSentBy")
+  auditLogs      AuditLog[]
+}
+
+// ---------- Core domain ----------
+
+model Customer {
+  id               String   @id @default(uuid())
+  name             String
+  phone            String   @unique // E.164, e.g. +9198xxxxxxx
+  alternatePhone   String?
+  defaultAddressId String?  @unique
+  defaultAddress   Address? @relation("CustomerDefaultAddress", fields: [defaultAddressId], references: [id])
+  notes            String?
+  isActive         Boolean  @default(true)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  orders         Order[]
+  subscriptions  Subscription[]
+  conversations  WhatsappConversation[]
+  payments       Payment[]
+  addressesOwned Address[]              @relation("CustomerAddresses")
+
+  @@index([phone])
+}
+
+model Address {
+  id               String        @id @default(uuid())
+  formattedAddress String
+  // Nullable: a WhatsApp lead can exist with no resolved location yet.
+  // An Order may only move to CONFIRMED, and only a confirmed Order with
+  // both set can be selected into a route — enforced in application code
+  // (see lib/services/orders.ts), not just here.
+  latitude         Float?
+  longitude        Float?
+  placeId          String?
+  landmark         String?
+  area             String? // sublocality/locality, for analytics grouping
+  source           AddressSource
+  rawInput         String? // original typed text / maps URL / "manual"
+  customerId       String?
+  customer         Customer?     @relation("CustomerAddresses", fields: [customerId], references: [id])
+  createdAt        DateTime      @default(now())
+
+  customerDefault Customer?      @relation("CustomerDefaultAddress")
+  orders          Order[]
+  subscriptions   Subscription[]
+
+  @@index([latitude, longitude])
+  @@index([customerId])
+}
+
+model WhatsappConversation {
+  id            String             @id @default(uuid())
+  waId          String             @unique // WhatsApp "from" id, digits only
+  customerId    String?
+  customer      Customer?          @relation(fields: [customerId], references: [id])
+  displayName   String?
+  status        ConversationStatus @default(OPEN)
+  lastMessageAt DateTime?
+  unreadCount   Int                @default(0)
+  createdAt     DateTime           @default(now())
+
+  messages WhatsappMessage[]
+  orders   Order[]
+
+  @@index([lastMessageAt])
+  @@index([customerId])
+}
+
+model WhatsappMessage {
+  id                String               @id @default(uuid())
+  conversationId    String
+  conversation      WhatsappConversation @relation(fields: [conversationId], references: [id])
+  direction         MessageDirection
+  type              MessageType
+  waMessageId       String?              @unique
+  textBody          String?
+  locationLatitude  Float?
+  locationLongitude Float?
+  locationName      String?
+  mediaId           String? // Graph API media id, not downloaded in MVP
+  templateName      String?
+  status            MessageStatus        @default(SENT)
+  errorDetail       String?
+  sentByUserId      String?
+  sentBy            Profile?             @relation("MessageSentBy", fields: [sentByUserId], references: [id])
+  createdAt         DateTime             @default(now())
+
+  @@index([conversationId, createdAt])
+}
+
+model Order {
+  id             String                @id @default(uuid())
+  sequenceNumber Int                   @unique @default(autoincrement()) // display: GBN-000123
+  customerId     String
+  customer       Customer              @relation(fields: [customerId], references: [id])
+  addressId      String
+  address        Address               @relation(fields: [addressId], references: [id])
+  conversationId String?
+  conversation   WhatsappConversation? @relation(fields: [conversationId], references: [id])
+  subscriptionId String?
+  subscription   Subscription?         @relation(fields: [subscriptionId], references: [id])
+
+  milkSize             MilkSize
+  customQuantityLiters Float?
+  quantity             Int         @default(1)
+  orderType            OrderType
+  source               OrderSource @default(MANUAL)
+  sourceCampaign       String?
+  sourceAd             String?
+  sourceAdset          String?
+
+  deliveryDate      DateTime       @db.Date
+  deliveryWindow    DeliveryWindow @default(MORNING)
+  customWindowStart String?
+  customWindowEnd   String?
+  deliveryNotes     String?
+  googleMapsUrl     String?
+
+  unitPrice   Decimal @db.Decimal(10, 2)
+  deliveryFee Decimal @default(0) @db.Decimal(10, 2)
+  subtotal    Decimal @db.Decimal(10, 2)
+  total       Decimal @db.Decimal(10, 2)
+
+  paymentStatus PaymentStatus @default(PENDING)
+  status        OrderStatus   @default(PENDING)
+
+  createdByUserId String?
+  createdBy       Profile? @relation("OrderCreatedBy", fields: [createdByUserId], references: [id])
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  routeStop RouteStop?
+  payments  Payment[]
+
+  @@unique([subscriptionId, deliveryDate])
+  @@index([deliveryDate, status])
+  @@index([customerId])
+}
+
+model Subscription {
+  id                   String                @id @default(uuid())
+  customerId           String
+  customer             Customer              @relation(fields: [customerId], references: [id])
+  addressId            String
+  address              Address               @relation(fields: [addressId], references: [id])
+  milkSize             MilkSize
+  customQuantityLiters Float?
+  quantity             Int                   @default(1)
+  frequency            SubscriptionFrequency @default(DAILY)
+  startDate            DateTime              @db.Date
+  endDate              DateTime?             @db.Date
+  status               SubscriptionStatus    @default(ACTIVE)
+  deliveryWindow       DeliveryWindow        @default(MORNING)
+  notes                String?
+  createdAt            DateTime              @default(now())
+  updatedAt            DateTime              @updatedAt
+
+  orders Order[]
+  skips  SubscriptionSkip[]
+
+  @@index([status, startDate, endDate])
+}
+
+model SubscriptionSkip {
+  id             String       @id @default(uuid())
+  subscriptionId String
+  subscription   Subscription @relation(fields: [subscriptionId], references: [id])
+  date           DateTime     @db.Date
+  reason         String?
+  createdAt      DateTime     @default(now())
+
+  @@unique([subscriptionId, date])
+}
+
+model Route {
+  id                     String      @id @default(uuid())
+  date                   DateTime    @db.Date
+  driverId               String?
+  driver                 Profile?    @relation("RouteDriver", fields: [driverId], references: [id])
+  startLocationLat       Float
+  startLocationLng       Float
+  startedAt              DateTime?
+  completedAt            DateTime?
+  plannedDistanceKm      Float?
+  plannedDurationMinutes Int?
+  status                 RouteStatus @default(PLANNED)
+  usedDevFallback        Boolean     @default(false)
+
+  revisionNumber  Int     @default(1)
+  previousRouteId String? @unique
+  previousRoute   Route?  @relation("RouteRevision", fields: [previousRouteId], references: [id])
+  nextRevision    Route?  @relation("RouteRevision")
+
+  createdByUserId String?
+  createdBy       Profile? @relation("RouteCreatedBy", fields: [createdByUserId], references: [id])
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  stops RouteStop[]
+
+  @@index([date, status])
+}
+
+model RouteStop {
+  id      String @id @default(uuid())
+  routeId String
+  route   Route  @relation(fields: [routeId], references: [id])
+  orderId String @unique
+  order   Order  @relation(fields: [orderId], references: [id])
+
+  stopNumber Int
+
+  // Snapshot at optimize time — history must not silently change if the
+  // live Order/Address is edited later.
+  customerNameSnapshot String
+  addressTextSnapshot  String
+  latitudeSnapshot     Float
+  longitudeSnapshot    Float
+  quantitySnapshot     String
+
+  estimatedArrival                   DateTime?
+  actualArrival                      DateTime?
+  deliveredAt                        DateTime?
+  status                             RouteStopStatus @default(PENDING)
+  plannedDistanceFromPreviousKm      Float?
+  plannedDurationFromPreviousMinutes Int?
+  failureReason                      String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([routeId, stopNumber])
+  @@index([routeId, status])
+}
+
+model Payment {
+  id         String              @id @default(uuid())
+  orderId    String?
+  order      Order?              @relation(fields: [orderId], references: [id])
+  customerId String
+  customer   Customer            @relation(fields: [customerId], references: [id])
+  amount     Decimal             @db.Decimal(10, 2)
+  method     PaymentMethod
+  status     PaymentRecordStatus @default(PENDING)
+  paidAt     DateTime?
+  notes      String?
+  createdAt  DateTime            @default(now())
+
+  @@index([customerId, createdAt])
+}
+
+model AuditLog {
+  id          String      @id @default(uuid())
+  action      AuditAction
+  entityType  String
+  entityId    String?
+  actorUserId String?
+  actor       Profile?    @relation(fields: [actorUserId], references: [id])
+  actorType   String      @default("admin") // admin | system | driver
+  // Changed field names / ids only — never raw address text, phone
+  // numbers, or other PII copied wholesale into the log.
+  metadata    Json?
+  createdAt   DateTime    @default(now())
+
+  @@index([entityType, entityId])
+  @@index([createdAt])
+}
+
+model Setting {
+  key       String   @id
+  value     Json
+  updatedAt DateTime @updatedAt
+}
