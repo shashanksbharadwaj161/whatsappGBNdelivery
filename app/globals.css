@@ -1,0 +1,80 @@
+@import "tailwindcss";
+
+:root {
+  /* Surfaces */
+  --color-bg: #faf6ec;
+  --color-surface: #ffffff;
+  --color-surface-alt: #f3eedd;
+  --color-border: #e6dfc9;
+
+  /* Text */
+  --color-ink: #1b2a22;
+  --color-ink-muted: #5c6b5f;
+  --color-ink-faint: #8a9186;
+
+  /* Brand */
+  --color-primary: #1f4b36;
+  --color-primary-hover: #163a29;
+  --color-primary-soft: #e4eee7;
+  --color-accent: #b8863a;
+  --color-accent-hover: #9c7130;
+  --color-accent-soft: #f3e6c8;
+
+  /* Status */
+  --color-status-pending: #b8863a;
+  --color-status-pending-soft: #f3e6c8;
+  --color-status-confirmed: #3a5c7a;
+  --color-status-confirmed-soft: #e3ecf3;
+  --color-status-transit: #b5562f;
+  --color-status-transit-soft: #f5e1d6;
+  --color-status-delivered: #1f4b36;
+  --color-status-delivered-soft: #e4eee7;
+  --color-status-cancelled: #a23b3b;
+  --color-status-cancelled-soft: #f5dede;
+  --color-status-skipped: #6b6357;
+  --color-status-skipped-soft: #ede8dc;
+}
+
+@theme inline {
+  --color-bg: var(--color-bg);
+  --color-surface: var(--color-surface);
+  --color-surface-alt: var(--color-surface-alt);
+  --color-border: var(--color-border);
+
+  --color-ink: var(--color-ink);
+  --color-ink-muted: var(--color-ink-muted);
+  --color-ink-faint: var(--color-ink-faint);
+
+  --color-primary: var(--color-primary);
+  --color-primary-hover: var(--color-primary-hover);
+  --color-primary-soft: var(--color-primary-soft);
+  --color-accent: var(--color-accent);
+  --color-accent-hover: var(--color-accent-hover);
+  --color-accent-soft: var(--color-accent-soft);
+
+  --color-status-pending: var(--color-status-pending);
+  --color-status-pending-soft: var(--color-status-pending-soft);
+  --color-status-confirmed: var(--color-status-confirmed);
+  --color-status-confirmed-soft: var(--color-status-confirmed-soft);
+  --color-status-transit: var(--color-status-transit);
+  --color-status-transit-soft: var(--color-status-transit-soft);
+  --color-status-delivered: var(--color-status-delivered);
+  --color-status-delivered-soft: var(--color-status-delivered-soft);
+  --color-status-cancelled: var(--color-status-cancelled);
+  --color-status-cancelled-soft: var(--color-status-cancelled-soft);
+  --color-status-skipped: var(--color-status-skipped);
+  --color-status-skipped-soft: var(--color-status-skipped-soft);
+
+  --font-display: var(--font-display);
+  --font-body: var(--font-body);
+}
+
+body {
+  background: var(--color-bg);
+  color: var(--color-ink);
+}
+
+::selection {
+  background: var(--color-accent-soft);
+  color: var(--color-ink);
+}
