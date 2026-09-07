@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { requireRole } from "@/lib/auth/guard";
+import { db } from "@/lib/db";
 import * as ordersService from "@/lib/services/orders";
 import * as customersService from "@/lib/services/customers";
 import { createAddress, type CreateAddressInput } from "@/lib/services/addresses";
@@ -35,6 +36,10 @@ export async function createOrderAction(input: CreateOrderActionInput) {
   });
 
   const address = await createAddress({ ...input.address, customerId: customer.id });
+
+  if (!customer.defaultAddressId) {
+    await db.customer.update({ where: { id: customer.id }, data: { defaultAddressId: address.id } });
+  }
 
   const order = await ordersService.createOrder({
     customerId: customer.id,

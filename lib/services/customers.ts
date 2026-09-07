@@ -58,7 +58,7 @@ export async function getCustomerDetail(customerId: string) {
     include: {
       defaultAddress: true,
       addressesOwned: { orderBy: { createdAt: "desc" } },
-      subscriptions: { orderBy: { createdAt: "desc" } },
+      subscriptions: { orderBy: { createdAt: "desc" }, include: { address: true } },
       orders: {
         orderBy: { deliveryDate: "desc" },
         take: 50,
