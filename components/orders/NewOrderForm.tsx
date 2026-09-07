@@ -1,13 +1,20 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useState, useTransition, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
+import { MapPin, Link2 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { Input, Label, Select, Textarea } from "@/components/ui/Input";
+import { AddressAutocompleteInput } from "@/components/maps/AddressAutocompleteInput";
+import { LocationPinDropMap } from "@/components/maps/LocationPinDropMap";
 import { createOrderAction } from "@/lib/actions/orders";
+import { getDeliveryEconomicsAction } from "@/lib/actions/deliveryEconomics";
 import { todayBusinessDateString } from "@/lib/tz";
-import type { DeliveryWindow, MilkSize, OrderType, PaymentStatus } from "@prisma/client";
+import type { DeliveryWindow, MilkSize, OrderType, PaymentStatus, AddressSource } from "@prisma/client";
+import type { DeliveryEconomics } from "@/lib/services/deliveryEconomics";
+
+const DEFAULT_MAP_CENTER = { lat: 13.067, lng: 77.556 }; // north Bengaluru — see Settings for the real base
 
 export function NewOrderForm({
   prefill,
@@ -32,9 +39,96 @@ export function NewOrderForm({
   const [landmark, setLandmark] = useState("");
   const [latitude, setLatitude] = useState("");
   const [longitude, setLongitude] = useState("");
+  const [area, setArea] = useState<string | null>(null);
+  const [addressSource, setAddressSource] = useState<AddressSource>("TYPED");
   const [googleMapsUrl, setGoogleMapsUrl] = useState("");
+  const [resolvingUrl, setResolvingUrl] = useState(false);
+  const [resolveError, setResolveError] = useState<string | null>(null);
+  const [geocoding, setGeocoding] = useState(false);
+  const [geocodeError, setGeocodeError] = useState<string | null>(null);
+  const [economics, setEconomics] = useState<DeliveryEconomics | null>(null);
   const [deliveryNotes, setDeliveryNotes] = useState("");
   const [paymentStatus, setPaymentStatus] = useState<PaymentStatus>("PENDING");
+
+  const applyLocation = useCallback(
+    (loc: { formattedAddress?: string; latitude: number; longitude: number; area?: string | null }, source: AddressSource) => {
+      if (loc.formattedAddress) setFormattedAddress(loc.formattedAddress);
+      setLatitude(String(loc.latitude));
+      setLongitude(String(loc.longitude));
+      if (loc.area) setArea(loc.area);
+      setAddressSource(source);
+    },
+    []
+  );
+
+  async function handleResolveMapsUrl() {
+    if (!googleMapsUrl.trim()) return;
+    setResolvingUrl(true);
+    setResolveError(null);
+    try {
+      const res = await fetch("/api/maps-url/resolve", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: googleMapsUrl.trim() }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setResolveError(data.error?.message ?? "Could not resolve this link");
+        return;
+      }
+      applyLocation(data, "MAPS_URL");
+    } catch {
+      setResolveError("Could not reach the server");
+    } finally {
+      setResolvingUrl(false);
+    }
+  }
+
+  async function handleGeocodeAddress() {
+    if (!formattedAddress.trim()) return;
+    setGeocoding(true);
+    setGeocodeError(null);
+    try {
+      const res = await fetch("/api/geocode", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ address: formattedAddress.trim() }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setGeocodeError(data.error?.message ?? "Could not find this address");
+        return;
+      }
+      applyLocation(data, "TYPED");
+    } catch {
+      setGeocodeError("Could not reach the server");
+    } finally {
+      setGeocoding(false);
+    }
+  }
+
+  function handlePinChange(position: { lat: number; lng: number }) {
+    setLatitude(String(position.lat));
+    setLongitude(String(position.lng));
+    setAddressSource("MANUAL_PIN");
+  }
+
+  useEffect(() => {
+    const lat = Number(latitude);
+    const lng = Number(longitude);
+    if (!latitude || !longitude || Number.isNaN(lat) || Number.isNaN(lng) || !deliveryDate) {
+      return;
+    }
+    let cancelled = false;
+    getDeliveryEconomicsAction(lat, lng, deliveryDate).then((result) => {
+      if (!cancelled) setEconomics(result);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [latitude, longitude, deliveryDate]);
+
+  const hasCoordinates = Boolean(latitude && longitude && !Number.isNaN(Number(latitude)) && !Number.isNaN(Number(longitude)));
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -48,8 +142,9 @@ export function NewOrderForm({
             landmark: landmark || null,
             latitude: latitude ? Number(latitude) : null,
             longitude: longitude ? Number(longitude) : null,
-            source: "TYPED",
-            rawInput: formattedAddress,
+            area,
+            source: addressSource,
+            rawInput: addressSource === "MAPS_URL" ? googleMapsUrl : formattedAddress,
           },
           milkSize,
           customQuantityLiters: milkSize === "CUSTOM" ? Number(customQuantityLiters) : null,
@@ -169,23 +264,57 @@ export function NewOrderForm({
       <Card>
         <CardContent className="space-y-4">
           <p className="font-medium text-ink">Address</p>
-          <p className="text-xs text-ink-muted">
-            Places autocomplete, Maps URL parsing, and pin-drop are wired up in Phase 3 — for now, enter
-            the address and coordinates directly if known.
-          </p>
+
+          <div>
+            <Label htmlFor="googleMapsUrl">Google Maps link (from WhatsApp)</Label>
+            <div className="flex gap-2">
+              <Input
+                id="googleMapsUrl"
+                placeholder="https://maps.app.goo.gl/..."
+                value={googleMapsUrl}
+                onChange={(e) => setGoogleMapsUrl(e.target.value)}
+              />
+              <Button type="button" variant="outline" disabled={resolvingUrl || !googleMapsUrl.trim()} onClick={handleResolveMapsUrl}>
+                <Link2 size={14} /> {resolvingUrl ? "Resolving…" : "Resolve"}
+              </Button>
+            </div>
+            {resolveError && <p className="mt-1 text-xs text-status-cancelled">{resolveError}</p>}
+          </div>
+
           <div>
             <Label htmlFor="formattedAddress">Address</Label>
-            <Textarea
-              id="formattedAddress"
-              required
-              value={formattedAddress}
-              onChange={(e) => setFormattedAddress(e.target.value)}
-            />
+            <div className="flex gap-2">
+              <div className="flex-1">
+                <AddressAutocompleteInput
+                  id="formattedAddress"
+                  required
+                  value={formattedAddress}
+                  onChange={setFormattedAddress}
+                  onPlaceSelected={(place) => applyLocation(place, "TYPED")}
+                />
+              </div>
+              <Button type="button" variant="outline" disabled={geocoding || !formattedAddress.trim()} onClick={handleGeocodeAddress}>
+                <MapPin size={14} /> {geocoding ? "Looking up…" : "Look up"}
+              </Button>
+            </div>
+            {geocodeError && <p className="mt-1 text-xs text-status-cancelled">{geocodeError}</p>}
           </div>
+
           <div>
             <Label htmlFor="landmark">Landmark</Label>
             <Input id="landmark" value={landmark} onChange={(e) => setLandmark(e.target.value)} />
           </div>
+
+          <div>
+            <Label>Pin on map</Label>
+            <LocationPinDropMap
+              latitude={latitude ? Number(latitude) : null}
+              longitude={longitude ? Number(longitude) : null}
+              defaultCenter={DEFAULT_MAP_CENTER}
+              onPinChange={handlePinChange}
+            />
+          </div>
+
           <div className="grid grid-cols-2 gap-3">
             <div>
               <Label htmlFor="latitude">Latitude</Label>
@@ -196,10 +325,18 @@ export function NewOrderForm({
               <Input id="longitude" type="number" step="any" value={longitude} onChange={(e) => setLongitude(e.target.value)} />
             </div>
           </div>
-          <div>
-            <Label htmlFor="googleMapsUrl">Google Maps URL (optional)</Label>
-            <Input id="googleMapsUrl" value={googleMapsUrl} onChange={(e) => setGoogleMapsUrl(e.target.value)} />
-          </div>
+
+          {economics && hasCoordinates && (
+            <div className="rounded-lg bg-surface-alt px-3 py-2 text-xs text-ink-muted">
+              <p className="font-medium text-ink">Is this delivery economical?</p>
+              <p className="mt-1">
+                Nearest of {economics.existingStopCount} confirmed stop{economics.existingStopCount === 1 ? "" : "s"}{" "}
+                today: <span className="font-medium text-ink">{economics.nearestStopKm.toFixed(1)} km</span> away
+                {economics.nearestStopKm > 5 && " — this looks well outside today's delivery zone."}
+              </p>
+            </div>
+          )}
+
           <div>
             <Label htmlFor="deliveryNotes">Delivery notes</Label>
             <Textarea id="deliveryNotes" value={deliveryNotes} onChange={(e) => setDeliveryNotes(e.target.value)} />
