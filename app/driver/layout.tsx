@@ -16,7 +16,7 @@ export default async function DriverLayout({
 
   return (
     <div className="mx-auto flex min-h-screen w-full max-w-md flex-col bg-bg">
-      <header className="flex h-14 items-center justify-between border-b border-border bg-surface px-4">
+      <header className="sticky top-0 z-40 flex h-14 shrink-0 items-center justify-between border-b border-border bg-surface px-4">
         <div className="flex items-center gap-2">
           <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-white">
             <Leaf size={16} />

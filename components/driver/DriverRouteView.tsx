@@ -2,7 +2,16 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Navigation, Phone, MessageCircle, CheckCircle2, XCircle, SkipForward } from "lucide-react";
+import {
+  Navigation,
+  Phone,
+  MessageCircle,
+  CheckCircle2,
+  ChevronDown,
+  ChevronUp,
+  PartyPopper,
+} from "lucide-react";
+import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
 import { ROUTE_STOP_STATUS_STYLE } from "@/lib/statusStyles";
@@ -21,6 +30,20 @@ export interface DriverStopView {
   longitude: number;
 }
 
+const UNAVAILABLE_REASONS = ["Not home", "Not answering", "Wrong address", "Asked to come later"];
+
+type Mode = "idle" | "confirmDeliver" | "pickReason";
+
+// Solid fills for anything already actioned, outline for what's still ahead —
+// legible as a status stepper at a glance, not just next to a text label.
+const STEPPER_TONE: Record<DriverStopView["status"], string> = {
+  PENDING: "bg-surface-alt text-ink-muted border border-border",
+  EN_ROUTE: "bg-surface-alt text-ink-muted border border-border",
+  DELIVERED: "bg-primary text-white",
+  SKIPPED: "bg-[var(--color-status-skipped)] text-white",
+  UNAVAILABLE: "bg-status-cancelled text-white",
+};
+
 export function DriverRouteView({
   routeId,
   routeStatus,
@@ -33,9 +56,13 @@ export function DriverRouteView({
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
+  const [mode, setMode] = useState<Mode>("idle");
+  const [justDelivered, setJustDelivered] = useState(false);
+  const [showAllStops, setShowAllStops] = useState(false);
 
   const completedCount = stops.filter((s) => s.status !== "PENDING" && s.status !== "EN_ROUTE").length;
   const nextStop = stops.find((s) => s.status === "PENDING" || s.status === "EN_ROUTE");
+  const progressPct = stops.length ? (completedCount / stops.length) * 100 : 0;
 
   function handleStart() {
     setError(null);
@@ -50,121 +77,248 @@ export function DriverRouteView({
     });
   }
 
-  function handleStopAction(stopId: string, status: "DELIVERED" | "SKIPPED" | "UNAVAILABLE") {
+  function submitStopAction(stopId: string, status: "DELIVERED" | "SKIPPED" | "UNAVAILABLE", failureReason?: string) {
     setError(null);
     startTransition(async () => {
       const res = await fetch(`/api/driver/stops/${stopId}/status`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status }),
+        body: JSON.stringify({ status, failureReason }),
       });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
         setError(data.error?.message ?? "Could not update this stop");
+        setMode("idle");
         return;
       }
-      router.refresh();
+      if (status === "DELIVERED") {
+        setJustDelivered(true);
+        setTimeout(() => {
+          setJustDelivered(false);
+          setMode("idle");
+          router.refresh();
+        }, 850);
+      } else {
+        setMode("idle");
+        router.refresh();
+      }
     });
   }
 
   return (
-    <div className="space-y-4">
-      <div>
-        <p className="text-sm font-medium text-ink">
-          {completedCount} / {stops.length} deliveries completed
-        </p>
-        <div className="mt-1.5 h-2 w-full overflow-hidden rounded-full bg-surface-alt">
-          <div
-            className="h-full rounded-full bg-primary transition-all"
-            style={{ width: `${stops.length ? (completedCount / stops.length) * 100 : 0}%` }}
-          />
+    <div className="relative">
+      {/* Sticky progress header — stays visible while scrolling the stop list. */}
+      <div className="sticky top-0 z-30 -mx-4 mb-4 border-b border-border bg-bg/95 px-4 py-3 backdrop-blur">
+        <div className="flex items-center justify-between text-sm">
+          <p className="font-medium text-ink">
+            {completedCount} / {stops.length} deliveries
+          </p>
+          {nextStop && <Badge tone="pending">Stop {nextStop.stopNumber} next</Badge>}
+        </div>
+        <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-surface-alt">
+          <div className="h-full rounded-full bg-primary transition-all duration-500" style={{ width: `${progressPct}%` }} />
         </div>
       </div>
 
-      {error && <p className="text-sm text-status-cancelled">{error}</p>}
+      <div className="space-y-4 pb-36">
+        {error && <p className="rounded-lg bg-status-cancelled-soft px-3 py-2 text-sm text-status-cancelled">{error}</p>}
 
-      {routeStatus === "PLANNED" && (
-        <Button className="w-full" size="lg" disabled={pending} onClick={handleStart}>
-          Start today&rsquo;s route
-        </Button>
-      )}
-
-      {routeStatus !== "PLANNED" && nextStop && (
-        <div className="rounded-xl border border-primary/30 bg-primary-soft p-4">
-          <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-primary">Next stop</p>
-          <p className="font-display text-lg text-ink">{nextStop.customerName}</p>
-          <p className="text-sm text-ink">{nextStop.quantity}</p>
-          <p className="text-sm text-ink-muted">{nextStop.area ?? nextStop.address}</p>
-          {nextStop.estimatedArrival && <p className="mt-1 text-sm font-medium text-primary">ETA {nextStop.estimatedArrival}</p>}
-
-          <div className="mt-3 grid grid-cols-3 gap-2">
-            <a
-              href={`https://www.google.com/maps/dir/?api=1&destination=${nextStop.latitude},${nextStop.longitude}`}
-              target="_blank"
-              rel="noreferrer"
-            >
-              <Button variant="outline" size="sm" className="w-full">
-                <Navigation size={14} /> Navigate
-              </Button>
-            </a>
-            <a href={`tel:${nextStop.customerPhone}`}>
-              <Button variant="outline" size="sm" className="w-full">
-                <Phone size={14} /> Call
-              </Button>
-            </a>
-            <a href={`https://wa.me/${nextStop.customerPhone.replace(/\D/g, "")}`} target="_blank" rel="noreferrer">
-              <Button variant="outline" size="sm" className="w-full">
-                <MessageCircle size={14} /> WhatsApp
-              </Button>
-            </a>
-          </div>
-
-          <Button
-            className="mt-3 w-full"
-            disabled={pending}
-            onClick={() => handleStopAction(nextStop.id, "DELIVERED")}
-          >
-            <CheckCircle2 size={16} /> Delivered
-          </Button>
-          <div className="mt-2 grid grid-cols-2 gap-2">
-            <Button
-              variant="outline"
-              disabled={pending}
-              onClick={() => handleStopAction(nextStop.id, "UNAVAILABLE")}
-            >
-              <XCircle size={14} /> Customer unavailable
-            </Button>
-            <Button variant="ghost" disabled={pending} onClick={() => handleStopAction(nextStop.id, "SKIPPED")}>
-              <SkipForward size={14} /> Skip
+        {routeStatus === "PLANNED" && (
+          <div className="rounded-xl border border-border bg-surface p-4 text-center">
+            <p className="mb-3 text-sm text-ink-muted">
+              {stops.length} stop{stops.length === 1 ? "" : "s"} planned for today.
+            </p>
+            <Button size="xl" className="w-full" disabled={pending} onClick={handleStart}>
+              Start today&rsquo;s route
             </Button>
           </div>
-        </div>
-      )}
+        )}
 
-      {routeStatus !== "PLANNED" && !nextStop && (
-        <div className="rounded-xl border border-primary/30 bg-primary-soft p-6 text-center">
-          <CheckCircle2 size={28} className="mx-auto mb-2 text-primary" />
-          <p className="font-medium text-ink">All deliveries complete for today.</p>
-        </div>
-      )}
-
-      <div className="space-y-2">
-        {stops.map((stop) => {
-          const style = ROUTE_STOP_STATUS_STYLE[stop.status];
-          return (
-            <div
-              key={stop.id}
-              className="flex items-center justify-between rounded-lg border border-border bg-surface px-3 py-2 text-sm"
-            >
-              <div>
-                <span className="mr-2 text-ink-faint">{stop.stopNumber}.</span>
-                <span className="text-ink">{stop.customerName}</span>
-              </div>
-              <Badge tone={style.tone}>{style.label}</Badge>
+        {routeStatus !== "PLANNED" && nextStop && (
+          <div className="rounded-2xl border border-primary/30 bg-primary-soft p-4">
+            <div className="mb-1 flex items-center justify-between">
+              <p className="text-xs font-semibold uppercase tracking-wide text-primary">Next stop</p>
+              {nextStop.estimatedArrival && <p className="text-xs font-semibold text-primary">ETA {nextStop.estimatedArrival}</p>}
             </div>
-          );
-        })}
+            <p className="font-display text-2xl leading-tight text-ink">{nextStop.customerName}</p>
+            <p className="mt-0.5 text-base text-ink">{nextStop.quantity}</p>
+            <p className="text-sm text-ink-muted">{nextStop.area ?? nextStop.address}</p>
+
+            <div className="mt-4 grid grid-cols-3 gap-2">
+              <a
+                href={`https://www.google.com/maps/dir/?api=1&destination=${nextStop.latitude},${nextStop.longitude}`}
+                target="_blank"
+                rel="noreferrer"
+                className="flex flex-col items-center justify-center gap-1 rounded-xl border border-border bg-surface py-3 text-ink transition-transform active:scale-[0.97]"
+              >
+                <Navigation size={22} />
+                <span className="text-xs font-medium">Navigate</span>
+              </a>
+              <a
+                href={`tel:${nextStop.customerPhone}`}
+                className="flex flex-col items-center justify-center gap-1 rounded-xl border border-border bg-surface py-3 text-ink transition-transform active:scale-[0.97]"
+              >
+                <Phone size={22} />
+                <span className="text-xs font-medium">Call</span>
+              </a>
+              <a
+                href={`https://wa.me/${nextStop.customerPhone.replace(/\D/g, "")}`}
+                target="_blank"
+                rel="noreferrer"
+                className="flex flex-col items-center justify-center gap-1 rounded-xl border border-border bg-surface py-3 text-ink transition-transform active:scale-[0.97]"
+              >
+                <MessageCircle size={22} />
+                <span className="text-xs font-medium">WhatsApp</span>
+              </a>
+            </div>
+          </div>
+        )}
+
+        {routeStatus !== "PLANNED" && !nextStop && stops.length > 0 && (
+          <div className="rounded-2xl border border-primary/30 bg-primary-soft p-8 text-center">
+            <PartyPopper size={32} className="mx-auto mb-2 text-primary" />
+            <p className="font-display text-lg text-ink">All caught up!</p>
+            <p className="mt-1 text-sm text-ink-muted">Every stop on today&rsquo;s route has been handled.</p>
+          </div>
+        )}
+
+        {stops.length > 0 && (
+          <div className="flex gap-2 overflow-x-auto pb-1">
+            {stops.map((s) => (
+              <div
+                key={s.id}
+                className={cn(
+                  "flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-semibold",
+                  STEPPER_TONE[s.status],
+                  nextStop?.id === s.id && "ring-2 ring-primary ring-offset-2 ring-offset-bg"
+                )}
+              >
+                {s.stopNumber}
+              </div>
+            ))}
+          </div>
+        )}
+
+        {stops.length > 0 && (
+          <div>
+            <button
+              type="button"
+              onClick={() => setShowAllStops((v) => !v)}
+              className="flex w-full items-center justify-center gap-1 py-1 text-sm font-medium text-ink-muted"
+            >
+              {showAllStops ? "Hide full stop list" : `View all ${stops.length} stops`}
+              {showAllStops ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+            </button>
+            {showAllStops && (
+              <div className="mt-2 space-y-2">
+                {stops.map((stop) => {
+                  const style = ROUTE_STOP_STATUS_STYLE[stop.status];
+                  return (
+                    <div
+                      key={stop.id}
+                      className="flex items-center justify-between rounded-lg border border-border bg-surface px-3 py-2 text-sm"
+                    >
+                      <div>
+                        <span className="mr-2 text-ink-faint">{stop.stopNumber}.</span>
+                        <span className="text-ink">{stop.customerName}</span>
+                        <p className="ml-5 text-xs text-ink-muted">{stop.quantity}</p>
+                      </div>
+                      <Badge tone={style.tone}>{style.label}</Badge>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
       </div>
+
+      {/* Fixed bottom action bar — thumb zone, always reachable one-handed. */}
+      {routeStatus !== "PLANNED" && nextStop && (
+        <div
+          className="fixed inset-x-0 bottom-0 z-40 mx-auto max-w-md border-t border-border bg-surface px-4 pt-3 shadow-[0_-4px_16px_rgba(0,0,0,0.08)]"
+          style={{ paddingBottom: "calc(env(safe-area-inset-bottom, 0px) + 0.75rem)" }}
+        >
+          {mode === "idle" && (
+            <>
+              <Button size="xl" className="w-full" disabled={pending} onClick={() => setMode("confirmDeliver")}>
+                <CheckCircle2 size={22} /> Mark delivered
+              </Button>
+              <div className="mt-2 flex gap-2">
+                <Button
+                  variant="outline"
+                  className="flex-1"
+                  disabled={pending}
+                  onClick={() => setMode("pickReason")}
+                >
+                  Customer unavailable
+                </Button>
+                <Button
+                  variant="ghost"
+                  className="flex-1"
+                  disabled={pending}
+                  onClick={() => submitStopAction(nextStop.id, "SKIPPED")}
+                >
+                  Skip
+                </Button>
+              </div>
+            </>
+          )}
+
+          {mode === "confirmDeliver" && (
+            <>
+              <p className="mb-2 text-center text-sm text-ink-muted">
+                Confirm delivery to <span className="font-medium text-ink">{nextStop.customerName}</span>?
+              </p>
+              <div className="flex gap-2">
+                <Button variant="outline" className="flex-1" disabled={pending} onClick={() => setMode("idle")}>
+                  Cancel
+                </Button>
+                <Button
+                  size="xl"
+                  className="flex-[2]"
+                  disabled={pending}
+                  onClick={() => submitStopAction(nextStop.id, "DELIVERED")}
+                >
+                  <CheckCircle2 size={20} /> Yes, delivered
+                </Button>
+              </div>
+            </>
+          )}
+
+          {mode === "pickReason" && (
+            <>
+              <p className="mb-2 text-sm text-ink-muted">Why is {nextStop.customerName} unavailable?</p>
+              <div className="mb-3 grid grid-cols-2 gap-2">
+                {UNAVAILABLE_REASONS.map((reason) => (
+                  <button
+                    key={reason}
+                    type="button"
+                    disabled={pending}
+                    onClick={() => submitStopAction(nextStop.id, "UNAVAILABLE", reason)}
+                    className="rounded-xl border border-border bg-surface-alt px-3 py-3 text-sm text-ink transition-transform active:scale-[0.97] disabled:opacity-50"
+                  >
+                    {reason}
+                  </button>
+                ))}
+              </div>
+              <Button variant="outline" className="w-full" disabled={pending} onClick={() => setMode("idle")}>
+                Cancel
+              </Button>
+            </>
+          )}
+        </div>
+      )}
+
+      {/* Success flash */}
+      {justDelivered && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-primary/95">
+          <div className="flex animate-success-pop flex-col items-center gap-3 text-white">
+            <CheckCircle2 size={64} />
+            <p className="text-xl font-medium">Delivered!</p>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
