@@ -38,11 +38,14 @@ Open [http://localhost:3000](http://localhost:3000).
 Every external integration in this app degrades honestly instead of
 faking success when it isn't configured:
 
-- **No `GOOGLE_MAPS_SERVER_API_KEY`**: route optimization uses a
-  clearly-labeled dev-only straight-line (haversine) fallback instead of
-  the real Google Routes API. This only applies outside production —
-  with `NODE_ENV=production` and no key, route optimization refuses to
-  run rather than silently producing an inaccurate "optimized" route.
+- **No `GOOGLE_MAPS_SERVER_API_KEY`**: route optimization and geocoding
+  run on **free, no-key services** — OSRM's public `/trip` server for
+  real road-based waypoint ordering, and Nominatim/OpenStreetMap for
+  turning typed addresses into coordinates. If OSRM is briefly
+  unreachable it falls back to a clearly-labeled straight-line estimate
+  for that one optimize. Set the Google key only if you specifically
+  prefer Google's Routes/Geocoding APIs — the app switches automatically
+  when it's present.
 - **No `NEXT_PUBLIC_GOOGLE_MAPS_API_KEY`**: every interactive map (the
   route map, the driver's delivery map, the order/settings pin-drop)
   renders with **Leaflet + OpenStreetMap**, which needs no API key — so

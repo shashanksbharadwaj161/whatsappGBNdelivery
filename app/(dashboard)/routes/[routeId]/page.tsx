@@ -73,9 +73,9 @@ export default async function RouteDetailPage({
 
       {route.usedDevFallback && (
         <div className="mb-4 rounded-lg bg-accent-soft px-4 py-2 text-sm text-accent-hover">
-          <strong>Dev-only routing:</strong> no Google Maps key is configured, so this route was ordered
-          by straight-line distance, not real road data. Add <code>GOOGLE_MAPS_SERVER_API_KEY</code> for
-          production-accurate routes.
+          <strong>Estimated distances:</strong> the road-routing service (OSRM) was unreachable, so this
+          route was ordered by straight-line distance — the stop order and ETAs are approximate. It will
+          use real road data automatically on the next optimize when the service is available.
         </div>
       )}
 

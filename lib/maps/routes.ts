@@ -4,8 +4,20 @@ import { UpstreamError, ValidationError } from "@/lib/errors";
 
 const ROUTES_API_URL = "https://routes.googleapis.com/directions/v2:computeRoutes";
 const MAX_WAYPOINTS = 25;
-/** Assumed average urban speed for the dev-only haversine fallback's ETA estimate. */
+/** Assumed average urban speed for the straight-line fallback's ETA estimate. */
 const DEV_FALLBACK_AVG_SPEED_KMH = 22;
+
+/**
+ * Free, no-key road-routing provider (OSRM). Defaults to the public demo
+ * server, which is fine for one driver's handful of daily route
+ * calculations; set OSRM_BASE_URL to a self-hosted instance for heavy
+ * use. Its /trip service solves the one-vehicle TSP and returns real
+ * road distances/durations.
+ */
+function osrmBaseUrl(): string {
+  return (process.env.OSRM_BASE_URL || "https://router.project-osrm.org").replace(/\/$/, "");
+}
+const OSRM_FETCH_TIMEOUT_MS = 12000;
 
 export interface RouteWaypoint {
   id: string;
@@ -133,7 +145,92 @@ async function optimizeViaGoogleRoutesApi(
   return { stops, totalDistanceKm, totalDurationMinutes, usedDevFallback: false };
 }
 
-/** Straight-line nearest-neighbor ordering — dev-only, never used when a real key is configured. */
+const osrmTripResponseSchema = z.object({
+  code: z.string(),
+  trips: z
+    .array(
+      z.object({
+        distance: z.number(), // meters, whole roundtrip
+        duration: z.number(), // seconds, whole roundtrip
+        legs: z.array(z.object({ distance: z.number(), duration: z.number() })),
+      })
+    )
+    .optional(),
+  waypoints: z.array(z.object({ waypoint_index: z.number() })).optional(),
+});
+
+/**
+ * Free road-based optimization via OSRM's /trip service (no API key).
+ * Depot is the first coordinate (source=first) and the driver returns to
+ * it (roundtrip=true). Returns real road distances/durations.
+ */
+async function optimizeViaOsrm(
+  origin: { lat: number; lng: number },
+  waypoints: RouteWaypoint[],
+  startTime: Date
+): Promise<OptimizeRouteResult> {
+  // OSRM coordinate order is lng,lat. Depot first, then the stops.
+  const coords = [origin, ...waypoints.map((w) => ({ lat: w.lat, lng: w.lng }))]
+    .map((c) => `${c.lng},${c.lat}`)
+    .join(";");
+  const url = `${osrmBaseUrl()}/trip/v1/driving/${coords}?source=first&roundtrip=true&overview=false&annotations=false`;
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), OSRM_FETCH_TIMEOUT_MS);
+  let res: Response;
+  try {
+    res = await fetch(url, { signal: controller.signal, headers: { "User-Agent": "GauBhoomiNaturals-Delivery/1.0" } });
+  } finally {
+    clearTimeout(timeout);
+  }
+
+  const raw = await res.json().catch(() => null);
+  const parsed = osrmTripResponseSchema.safeParse(raw);
+  if (!res.ok || !parsed.success || parsed.data.code !== "Ok" || !parsed.data.trips?.length || !parsed.data.waypoints) {
+    throw new UpstreamError(`OSRM routing returned an unexpected response (${raw?.code ?? res.status})`);
+  }
+
+  const trip = parsed.data.trips[0];
+  const respWaypoints = parsed.data.waypoints;
+  const expectedCount = waypoints.length + 1;
+  if (respWaypoints.length !== expectedCount || trip.legs.length !== expectedCount) {
+    throw new UpstreamError("OSRM routing response did not match the number of waypoints sent");
+  }
+
+  // waypoint_index gives each input coordinate's position in the optimized
+  // trip. Depot (input 0) is position 0; sort the real stops by position.
+  const ordered = [...waypoints]
+    .map((wp, i) => ({ wp, position: respWaypoints[i + 1].waypoint_index }))
+    .sort((a, b) => a.position - b.position);
+
+  const stops: OptimizedStop[] = [];
+  let cumulativeMs = startTime.getTime();
+
+  ordered.forEach((entry, seq) => {
+    // Leg into optimized position `position` is legs[position - 1].
+    const leg = trip.legs[entry.position - 1];
+    const distanceKm = leg.distance / 1000;
+    const durationMinutes = leg.duration / 60;
+    cumulativeMs += durationMinutes * 60 * 1000;
+    stops.push({
+      id: entry.wp.id,
+      sequenceIndex: seq,
+      distanceFromPreviousKm: distanceKm,
+      durationFromPreviousMinutes: durationMinutes,
+      estimatedArrival: new Date(cumulativeMs),
+    });
+  });
+
+  // Trip totals already include the closing leg back to the depot.
+  return {
+    stops,
+    totalDistanceKm: trip.distance / 1000,
+    totalDurationMinutes: trip.duration / 60,
+    usedDevFallback: false,
+  };
+}
+
+/** Straight-line nearest-neighbor ordering — last-resort estimate when no road-routing provider is reachable. */
 function optimizeViaHaversineFallback(
   origin: { lat: number; lng: number },
   waypoints: RouteWaypoint[],
@@ -172,11 +269,13 @@ function optimizeViaHaversineFallback(
 }
 
 /**
- * One-driver route optimization. Uses the real Google Routes API
- * (`computeRoutes` with `optimizeWaypointOrder`) when a key is
- * configured. Without one, falls back to straight-line nearest-neighbor
- * ordering ONLY outside production — a broken key in production must
- * fail loudly rather than silently produce a deceptively "valid" route.
+ * One-driver route optimization, in provider priority order:
+ *   1. Google Routes API — when GOOGLE_MAPS_SERVER_API_KEY is set.
+ *   2. OSRM /trip — free, no key, real road distances (the default).
+ *   3. Straight-line nearest-neighbor + 2-opt — last resort if OSRM is
+ *      unreachable, flagged usedDevFallback so the UI can say the ETAs
+ *      are estimates rather than road data.
+ * Every path returns to the depot (round trip).
  */
 export async function optimizeRoute(
   origin: { lat: number; lng: number },
@@ -194,14 +293,12 @@ export async function optimizeRoute(
     return optimizeViaGoogleRoutesApi(origin, waypoints, startTime);
   }
 
-  if (process.env.NODE_ENV === "production") {
-    throw new UpstreamError(
-      "GOOGLE_MAPS_SERVER_API_KEY is not configured — route optimization cannot run in production without it."
+  try {
+    return await optimizeViaOsrm(origin, waypoints, startTime);
+  } catch (error) {
+    console.warn(
+      `[routing] OSRM unavailable (${error instanceof Error ? error.message : "unknown error"}) — falling back to straight-line estimate.`
     );
+    return optimizeViaHaversineFallback(origin, waypoints, startTime);
   }
-
-  console.warn(
-    "[dev-fallback] No GOOGLE_MAPS_SERVER_API_KEY configured — using straight-line nearest-neighbor routing for local development only."
-  );
-  return optimizeViaHaversineFallback(origin, waypoints, startTime);
 }
