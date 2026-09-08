@@ -43,9 +43,14 @@ faking success when it isn't configured:
   the real Google Routes API. This only applies outside production —
   with `NODE_ENV=production` and no key, route optimization refuses to
   run rather than silently producing an inaccurate "optimized" route.
-- **No `NEXT_PUBLIC_GOOGLE_MAPS_API_KEY`**: Places Autocomplete and the
-  interactive pin-drop map degrade to plain text/numeric inputs with an
-  explanatory note, rather than a broken widget.
+- **No `NEXT_PUBLIC_GOOGLE_MAPS_API_KEY`**: every interactive map (the
+  route map, the driver's delivery map, the order/settings pin-drop)
+  renders with **Leaflet + OpenStreetMap**, which needs no API key — so
+  delivery locations are always visible on a real pan/zoom map with
+  numbered, colour-coded pins out of the box. When a key *is* set, the
+  Google Maps JS API is used instead. (Places Autocomplete is Google-
+  only and still degrades to a plain address input without a key.) Map
+  tiles need public internet; the pins and route line render regardless.
 - **No `WHATSAPP_ACCESS_TOKEN`**: outbound WhatsApp sends fail against
   the real Graph API and are recorded as `FAILED` (visible in the
   Inbox, logged to the audit trail) — never silently dropped or faked

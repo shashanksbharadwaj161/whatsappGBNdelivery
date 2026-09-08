@@ -2,6 +2,7 @@
 
 import { useEffect, useRef } from "react";
 import { useGoogleMapsScript } from "@/lib/maps/useGoogleMapsScript";
+import { LeafletMap } from "@/components/maps/LeafletMap";
 
 interface LocationPinDropMapProps {
   latitude: number | null;
@@ -10,7 +11,8 @@ interface LocationPinDropMapProps {
   onPinChange: (position: { lat: number; lng: number }) => void;
 }
 
-/** Draggable-pin map for manually placing a delivery location. Requires a real Google Maps key. */
+/** Draggable-pin map for manually placing a delivery location. Uses Google
+ * Maps when a key is configured, otherwise a key-free Leaflet map. */
 export function LocationPinDropMap({ latitude, longitude, defaultCenter, onPinChange }: LocationPinDropMapProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<google.maps.Map | null>(null);
@@ -18,7 +20,7 @@ export function LocationPinDropMap({ latitude, longitude, defaultCenter, onPinCh
   const { configured, loaded } = useGoogleMapsScript();
 
   useEffect(() => {
-    if (!loaded || !containerRef.current || mapRef.current) return;
+    if (!configured || !loaded || !containerRef.current || mapRef.current) return;
 
     const center = latitude && longitude ? { lat: latitude, lng: longitude } : defaultCenter;
     const map = new google.maps.Map(containerRef.current, {
@@ -43,7 +45,7 @@ export function LocationPinDropMap({ latitude, longitude, defaultCenter, onPinCh
     mapRef.current = map;
     markerRef.current = marker;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loaded]);
+  }, [configured, loaded]);
 
   useEffect(() => {
     if (!mapRef.current || !markerRef.current || latitude === null || longitude === null) return;
@@ -52,15 +54,16 @@ export function LocationPinDropMap({ latitude, longitude, defaultCenter, onPinCh
     mapRef.current.panTo(pos);
   }, [latitude, longitude]);
 
-  if (!configured) {
-    return (
-      <div className="flex h-48 items-center justify-center rounded-lg border border-dashed border-border bg-surface-alt text-center text-xs text-ink-faint">
-        Interactive pin-drop map needs NEXT_PUBLIC_GOOGLE_MAPS_API_KEY —
-        <br />
-        use the latitude/longitude fields below in the meantime.
-      </div>
-    );
+  if (configured) {
+    return <div ref={containerRef} className="h-48 w-full rounded-lg border border-border" />;
   }
 
-  return <div ref={containerRef} className="h-48 w-full rounded-lg border border-border" />;
+  return (
+    <LeafletMap
+      center={latitude != null && longitude != null ? { lat: latitude, lng: longitude } : defaultCenter}
+      zoom={15}
+      draggableMarker={{ lat: latitude, lng: longitude, onChange: onPinChange }}
+      heightClassName="h-48"
+    />
+  );
 }

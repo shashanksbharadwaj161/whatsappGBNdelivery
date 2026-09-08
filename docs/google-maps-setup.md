@@ -68,6 +68,14 @@ elsewhere.
   "not configured" error in the order form rather than failing silently
   — you can still fall back to the manual pin-drop map or typed
   lat/lng fields.
+- **Interactive maps still work with no key at all.** The route map,
+  the driver's delivery map and the order/settings pin-drop render via
+  Leaflet + OpenStreetMap (no API key) whenever
+  `NEXT_PUBLIC_GOOGLE_MAPS_API_KEY` is unset, so delivery locations are
+  always visible. Set the browser key only if you specifically prefer
+  Google's map tiles/Places Autocomplete — the app switches to Google
+  automatically when the key is present. (Map tiles need public
+  internet to load; the pins and route line render either way.)
 
 ## 6. Setting the base/depot location
 

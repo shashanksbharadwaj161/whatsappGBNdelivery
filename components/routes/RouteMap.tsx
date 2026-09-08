@@ -2,6 +2,7 @@
 
 import { useEffect, useRef } from "react";
 import { useGoogleMapsScript } from "@/lib/maps/useGoogleMapsScript";
+import { LeafletMap, type LeafletMarker } from "@/components/maps/LeafletMap";
 
 export interface RouteMapStop {
   id: string;
@@ -12,7 +13,7 @@ export interface RouteMapStop {
   customerName: string;
 }
 
-const PIN_COLORS: Record<RouteMapStop["status"], string> = {
+export const PIN_COLORS: Record<RouteMapStop["status"], string> = {
   PENDING: "#b8863a",
   EN_ROUTE: "#b5562f",
   DELIVERED: "#1f4b36",
@@ -23,15 +24,17 @@ const PIN_COLORS: Record<RouteMapStop["status"], string> = {
 export function RouteMap({
   start,
   stops,
+  heightClassName = "h-64",
 }: {
   start: { lat: number; lng: number };
   stops: RouteMapStop[];
+  heightClassName?: string;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const { configured, loaded } = useGoogleMapsScript();
 
   useEffect(() => {
-    if (!loaded || !containerRef.current) return;
+    if (!configured || !loaded || !containerRef.current) return;
 
     const bounds = new google.maps.LatLngBounds();
     const map = new google.maps.Map(containerRef.current, {
@@ -81,17 +84,34 @@ export function RouteMap({
 
     if (stops.length > 0) map.fitBounds(bounds, 48);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loaded, start.lat, start.lng, stops.length]);
+  }, [configured, loaded, start.lat, start.lng, stops.length]);
 
-  if (!configured) {
-    return (
-      <div className="flex h-64 items-center justify-center rounded-lg border border-dashed border-border bg-surface-alt text-center text-xs text-ink-faint">
-        Route map needs NEXT_PUBLIC_GOOGLE_MAPS_API_KEY — the stop list
-        <br />
-        below has the full route order, distances, and ETAs.
-      </div>
-    );
+  // Google Maps when a key is configured; otherwise the key-free
+  // Leaflet/OpenStreetMap map so the route is always visible.
+  if (configured) {
+    return <div ref={containerRef} className={`${heightClassName} w-full rounded-lg border border-border`} />;
   }
 
-  return <div ref={containerRef} className="h-64 w-full rounded-lg border border-border" />;
+  const markers: LeafletMarker[] = [
+    { id: "start", lat: start.lat, lng: start.lng, label: "S", color: "#1f4b36", title: "Start · Gau Bhoomi Naturals" },
+    ...stops.map((s) => ({
+      id: s.id,
+      lat: s.lat,
+      lng: s.lng,
+      label: String(s.stopNumber),
+      color: PIN_COLORS[s.status],
+      title: `${s.stopNumber}. ${s.customerName}`,
+    })),
+  ];
+  const polyline = [start, ...stops.map((s) => ({ lat: s.lat, lng: s.lng })), start];
+
+  return (
+    <LeafletMap
+      center={start}
+      markers={markers}
+      polyline={stops.length > 0 ? polyline : undefined}
+      fitToMarkers
+      heightClassName={heightClassName}
+    />
+  );
 }

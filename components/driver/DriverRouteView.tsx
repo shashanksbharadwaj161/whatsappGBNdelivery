@@ -14,6 +14,8 @@ import {
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
+import { LeafletMap, type LeafletMarker } from "@/components/maps/LeafletMap";
+import { PIN_COLORS } from "@/components/routes/RouteMap";
 import { ROUTE_STOP_STATUS_STYLE } from "@/lib/statusStyles";
 
 export interface DriverStopView {
@@ -63,6 +65,21 @@ export function DriverRouteView({
   const completedCount = stops.filter((s) => s.status !== "PENDING" && s.status !== "EN_ROUTE").length;
   const nextStop = stops.find((s) => s.status === "PENDING" || s.status === "EN_ROUTE");
   const progressPct = stops.length ? (completedCount / stops.length) * 100 : 0;
+
+  const mapMarkers: LeafletMarker[] = stops.map((s) => ({
+    id: s.id,
+    lat: s.latitude,
+    lng: s.longitude,
+    label: String(s.stopNumber),
+    color: PIN_COLORS[s.status],
+    title: `${s.stopNumber}. ${s.customerName}`,
+    emphasized: nextStop?.id === s.id,
+  }));
+  const mapCenter = nextStop
+    ? { lat: nextStop.latitude, lng: nextStop.longitude }
+    : stops[0]
+      ? { lat: stops[0].latitude, lng: stops[0].longitude }
+      : { lat: 13.067, lng: 77.556 };
 
   function handleStart() {
     setError(null);
@@ -180,6 +197,10 @@ export function DriverRouteView({
             <p className="font-display text-lg text-ink">All caught up!</p>
             <p className="mt-1 text-sm text-ink-muted">Every stop on today&rsquo;s route has been handled.</p>
           </div>
+        )}
+
+        {stops.length > 0 && (
+          <LeafletMap center={mapCenter} markers={mapMarkers} fitToMarkers heightClassName="h-52" />
         )}
 
         {stops.length > 0 && (
