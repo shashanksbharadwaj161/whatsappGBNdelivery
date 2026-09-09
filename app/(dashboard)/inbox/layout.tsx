@@ -1,3 +1,4 @@
+import { InboxFrame } from "@/components/inbox/InboxFrame";
 import { ConversationList, type ConversationSummary } from "@/components/inbox/ConversationList";
 import { listConversations } from "@/lib/services/conversations";
 
@@ -21,9 +22,6 @@ export default async function InboxLayout({ children }: { children: React.ReactN
   }));
 
   return (
-    <div className="flex h-[calc(100vh-3.5rem-4rem)] overflow-hidden rounded-xl border border-border bg-surface md:flex-row">
-      <ConversationList conversations={summaries} />
-      <div className="flex-1 overflow-hidden">{children}</div>
-    </div>
+    <InboxFrame list={<ConversationList conversations={summaries} />}>{children}</InboxFrame>
   );
 }

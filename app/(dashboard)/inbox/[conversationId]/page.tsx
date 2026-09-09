@@ -1,3 +1,5 @@
+import Link from "next/link";
+import { formatBusinessDateTime } from "@/lib/tz";
 import { getConversationDetail, markConversationRead } from "@/lib/services/conversations";
 import { ConversationActions } from "@/components/inbox/ConversationActions";
 import { ReplyBox } from "@/components/inbox/ReplyBox";
@@ -21,7 +23,8 @@ export default async function ConversationThreadPage({
   const displayPhone = conversation.customer?.phone ?? `+${conversation.waId}`;
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="flex h-full min-w-0 flex-col">
+      <Link href="/inbox" className="px-4 py-3 text-sm text-primary md:hidden">← All conversations</Link>
       <div className="flex flex-col gap-3 border-b border-border px-4 py-3">
         <div>
           <p className="font-medium text-ink">{displayName}</p>
@@ -41,7 +44,7 @@ export default async function ConversationThreadPage({
           <div key={message.id} className={cn("flex", message.direction === "OUTBOUND" ? "justify-end" : "justify-start")}>
             <div
               className={cn(
-                "max-w-md rounded-xl px-3 py-2 text-sm",
+                "max-w-[85%] break-words rounded-xl px-3 py-2 text-sm",
                 message.direction === "OUTBOUND" ? "bg-primary text-white" : "bg-surface-alt text-ink"
               )}
             >
@@ -62,7 +65,7 @@ export default async function ConversationThreadPage({
                 <p className="mt-1 text-xs text-status-cancelled">Failed to send{message.errorDetail ? `: ${message.errorDetail}` : ""}</p>
               )}
               <p className={cn("mt-1 text-[10px]", message.direction === "OUTBOUND" ? "text-white/70" : "text-ink-faint")}>
-                {message.createdAt.toLocaleString("en-IN", { hour: "numeric", minute: "2-digit", day: "numeric", month: "short" })}
+                {formatBusinessDateTime(message.createdAt)}
               </p>
             </div>
           </div>
