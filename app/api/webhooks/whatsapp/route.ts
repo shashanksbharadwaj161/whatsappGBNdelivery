@@ -1,3 +1,4 @@
+import { automateInbound } from "@/lib/services/whatsapp-automation";
 import { NextRequest, NextResponse } from "next/server";
 import { verifyWebhookSignature, normalizeInboundMessages, normalizeStatusUpdates, type WebhookPayload } from "@/lib/whatsapp/webhook";
 import { recordInboundMessage, applyStatusUpdate } from "@/lib/services/conversations";
@@ -38,7 +39,8 @@ export async function POST(request: NextRequest) {
   const messages = normalizeInboundMessages(payload);
   for (const message of messages) {
     try {
-      await recordInboundMessage(message);
+      const saved = await recordInboundMessage(message);
+      await automateInbound(saved.id);
     } catch (error) {
       failed = true;
       console.error("WhatsApp webhook: failed to record inbound message", message.waMessageId, error);

@@ -25,6 +25,7 @@ export function computeOrderPricing(params: {
   quantity: number;
   deliveryFee?: number;
 }) {
+  if (!Number.isInteger(params.quantity) || params.quantity < 1) throw new ValidationError("Quantity must be a positive whole number");
   const unitPrice = unitPriceForMilkSize(params.milkSize, params.customQuantityLiters);
   const deliveryFee = params.deliveryFee ?? DELIVERY_FEE;
   const subtotal = Number((unitPrice * params.quantity).toFixed(2));

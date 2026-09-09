@@ -222,6 +222,7 @@ model Address {
 }
 
 model WhatsappConversation {
+  intakeState Json?
   id            String             @id @default(uuid())
   waId          String             @unique // WhatsApp "from" id, digits only
   customerId    String?
@@ -240,6 +241,8 @@ model WhatsappConversation {
 }
 
 model WhatsappMessage {
+  automationProcessedAt DateTime?
+  automationReplyTo String? @unique
   id                String               @id @default(uuid())
   conversationId    String
   conversation      WhatsappConversation @relation(fields: [conversationId], references: [id])

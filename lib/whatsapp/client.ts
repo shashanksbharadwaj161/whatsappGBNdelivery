@@ -1,4 +1,4 @@
-const GRAPH_API_VERSION = "v21.0";
+const GRAPH_API_VERSION = process.env.WHATSAPP_GRAPH_API_VERSION || "v21.0";
 
 export type SendResult =
   | { ok: true; waMessageId: string }
@@ -19,6 +19,7 @@ async function callGraphApi(body: Record<string, unknown>): Promise<SendResult> 
   try {
     const res = await fetch(graphUrl(), {
       method: "POST",
+      signal: AbortSignal.timeout(15000),
       headers: {
         Authorization: `Bearer ${token}`,
         "Content-Type": "application/json",

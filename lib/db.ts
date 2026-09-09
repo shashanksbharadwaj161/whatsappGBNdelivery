@@ -1,3 +1,5 @@
+import { supabaseRootCertificate } from "@/lib/certs/supabase-ca";
+import { rootCertificates } from "node:tls";
 import { getDatabaseUrl } from "@/lib/database-url";
 import { PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
@@ -13,7 +15,10 @@ function createPrismaClient() {
   if (!connectionString) {
     throw new Error("Database connection is not configured");
   }
-  const adapter = new PrismaPg({ connectionString, max: 5, connectionTimeoutMillis: 10000 });
+  const url = new URL(connectionString);
+  const isSupabase = url.hostname.endsWith(".supabase.com") || url.hostname.endsWith(".supabase.co");
+  if (isSupabase) url.searchParams.delete("sslmode");
+  const adapter = new PrismaPg({ connectionString: url.toString(), max: 5, connectionTimeoutMillis: 10000, ...(isSupabase ? { ssl: { rejectUnauthorized: true, ca: [...rootCertificates, supabaseRootCertificate] } } : {}) });
   return new PrismaClient({ adapter });
 }
 

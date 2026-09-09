@@ -30,5 +30,5 @@ export async function createAddress(input: CreateAddressInput) {
 }
 
 export function hasCoordinates(address: { latitude: number | null; longitude: number | null }) {
-  return address.latitude !== null && address.longitude !== null;
+  return address.latitude !== null && address.longitude !== null && Number.isFinite(address.latitude) && Number.isFinite(address.longitude) && Math.abs(address.latitude) <= 90 && Math.abs(address.longitude) <= 180;
 }
