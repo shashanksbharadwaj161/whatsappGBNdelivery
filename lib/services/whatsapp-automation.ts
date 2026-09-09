@@ -1,3 +1,5 @@
+import { resolveGoogleMapsUrl } from '@/lib/maps/resolveShareUrl';
+import { addToAutomaticRound } from '@/lib/services/automatic-routes';
 import { Prisma } from '@prisma/client';
 import { db } from '@/lib/db';
 import { advanceIntake, intakeSchema } from '@/lib/whatsapp/intake';
@@ -8,6 +10,13 @@ import { sendSessionTextMessage } from '@/lib/whatsapp/client';
 /** State and order creation commit atomically, once per inbound message. */
 export async function automateInbound(messageId: string) {
   if (process.env.WHATSAPP_AUTOMATION_ENABLED !== 'true') return;
+  const incoming = await db.whatsappMessage.findUniqueOrThrow({where:{id:messageId},include:{conversation:true}});
+  let linkedLocation: {lat:number;lng:number}|null = null;
+  const incomingState = intakeSchema.safeParse(incoming.conversation.intakeState);
+  if(!incoming.automationProcessedAt && incomingState.success && incomingState.data.step==='location' && /^https:\/\//i.test(incoming.textBody?.trim()??'')) {
+    const resolved=await resolveGoogleMapsUrl(incoming.textBody!.trim());
+    if(resolved.ok) linkedLocation={lat:resolved.data.latitude,lng:resolved.data.longitude};
+  }
   const reply = await db.$transaction(async tx => {
     const initial = await tx.whatsappMessage.findUniqueOrThrow({where:{id:messageId}});
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${initial.conversationId}))`;
@@ -18,7 +27,7 @@ export async function automateInbound(messageId: string) {
       await tx.whatsappMessage.update({where:{id:messageId},data:{automationProcessedAt:new Date()}}); return null;
     }
     const previous=intakeSchema.safeParse(message.conversation.intakeState);
-    const result=advanceIntake(previous.success?previous.data:null,message.textBody??'',message.locationLatitude!=null&&message.locationLongitude!=null?{lat:message.locationLatitude,lng:message.locationLongitude}:null,todayBusinessDateString());
+    const result=advanceIntake(previous.success?previous.data:null,message.textBody??'',message.locationLatitude!=null&&message.locationLongitude!=null?{lat:message.locationLatitude,lng:message.locationLongitude}:linkedLocation,todayBusinessDateString());
     let replyText=result.reply;
     if(result.confirm) {
       const state=result.state;
@@ -28,6 +37,7 @@ export async function automateInbound(messageId: string) {
         const customer=await tx.customer.upsert({where:{phone:`+${message.conversation.waId}`},create:{name:state.name,phone:`+${message.conversation.waId}`,email:state.email},update:{name:state.name,...(state.email?{email:state.email}:{})}});
         const address=await tx.address.create({data:{customerId:customer.id,formattedAddress:state.address,latitude:state.lat,longitude:state.lng,source:'WHATSAPP_LOCATION'}});
         const order=await tx.order.create({data:{customerId:customer.id,addressId:address.id,conversationId:message.conversationId,milkSize:state.milkSize,quantity:state.quantity,deliveryDate:businessDateOnlyToDate(state.date),deliveryWindow:'MORNING',orderType:'ONE_TIME',source:'WHATSAPP',status:'CONFIRMED',...computeOrderPricing({milkSize:state.milkSize,quantity:state.quantity})}});
+        await addToAutomaticRound(tx, order.id);
         await tx.customer.update({where:{id:customer.id},data:{defaultAddressId:address.id}});
         await tx.whatsappConversation.update({where:{id:message.conversationId},data:{customerId:customer.id}});
         await tx.auditLog.create({data:{action:'ORDER_CREATED',entityType:'Order',entityId:order.id,actorType:'system',metadata:{source:'WHATSAPP'}}});

@@ -8,13 +8,15 @@ export async function startRoute(routeId: string, actorUserId?: string) {
   if (!route) throw new NotFoundError("Route not found");
   if (route.status !== "PLANNED") throw new ConflictError(`Route is already ${route.status.toLowerCase()}`);
 
-  await db.$transaction([
-    db.route.update({ where: { id: routeId }, data: { status: "IN_PROGRESS", startedAt: new Date() } }),
-    db.order.updateMany({
-      where: { id: { in: route.stops.map((s) => s.orderId) } },
-      data: { status: "OUT_FOR_DELIVERY" },
-    }),
-  ]);
+  if (route.awaitingDriverLocation) throw new ConflictError("Plan this round from your current location before starting deliveries.");
+
+  await db.$transaction(async tx => {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`routes:${route.date.toISOString()}`}))`;
+    const fresh = await tx.route.findUniqueOrThrow({where:{id:routeId}});
+    if(fresh.status!=="PLANNED" || fresh.updatedAt.getTime()!==route.updatedAt.getTime()) throw new ConflictError("The route changed. Refresh before starting.");
+    await tx.route.update({ where: { id: routeId }, data: { status: "IN_PROGRESS", startedAt: new Date() } });
+    await tx.order.updateMany({where:{id:{in:route.stops.map(s=>s.orderId)}},data:{status:"OUT_FOR_DELIVERY"}});
+  });
 
   await recordAudit({
     action: "ROUTE_STARTED",

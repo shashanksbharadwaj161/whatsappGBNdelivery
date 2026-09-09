@@ -30,9 +30,9 @@ export function advanceIntake(state: Intake | null, text: string, location: {lat
       next.date=value; next.step='address'; return {state:next,reply:'Send the full delivery address, including house/flat, street, area and pincode.'};
     case 'address':
       if(value.length<15 || value.length>1000) return {state,reply:'Please send your full address, including house/flat, street and pincode.'};
-      next.address=value; next.step='location'; return {state:next,reply:'Please attach the delivery location using WhatsApp → Attach (+) → Location. Place the pin at your building; a pincode alone is not precise enough for the driver.'};
+      next.address=value; next.step='location'; return {state:next,reply:'Please attach the delivery location using WhatsApp → Attach (+) → Location. You can also send a Google Maps pin link. Place the pin at your building; a pincode alone is not precise enough for the driver.'};
     case 'location':
-      if(!location || !Number.isFinite(location.lat) || !Number.isFinite(location.lng) || Math.abs(location.lat)>90 || Math.abs(location.lng)>180) return {state,reply:'Please attach a WhatsApp location pin for the delivery address, or send AGENT for help.'};
+      if(!location || !Number.isFinite(location.lat) || !Number.isFinite(location.lng) || Math.abs(location.lat)>90 || Math.abs(location.lng)>180) return {state,reply:'Please attach a WhatsApp location pin or a Google Maps pin link for the delivery address, or send AGENT for help.'};
       next.lat=location.lat; next.lng=location.lng; next.step='email'; return {state:next,reply:'What is your email address? Send SKIP if you prefer not to provide one.'};
     case 'email':
       if(!/^skip$/i.test(value) && !z.email().safeParse(value).success) return {state,reply:'Please send a valid email address or SKIP.'};

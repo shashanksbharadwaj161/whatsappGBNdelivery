@@ -1,3 +1,4 @@
+import { PlanFromLocation } from "@/components/driver/PlanFromLocation";
 import Link from "next/link";
 import { ArrowLeft, Truck } from "lucide-react";
 import { PageHeader } from "@/components/layout/PageHeader";
@@ -73,6 +74,7 @@ export default async function RouteDetailPage({
         }
       />
 
+      {route.awaitingDriverLocation && <div className="mb-6 space-y-3 rounded-lg border border-border bg-surface-alt p-4"><p className="text-sm">These delivery stops were collected automatically from confirmed WhatsApp orders. Use the driver’s current location to calculate road distances and the visiting order.</p><PlanFromLocation routeId={route.id}/></div>}
       {route.usedDevFallback && (
         <div className="mb-4 rounded-lg bg-accent-soft px-4 py-2 text-sm text-accent-hover">
           <strong>Estimated distances:</strong> the road-routing service (OSRM) was unreachable, so this
@@ -94,12 +96,12 @@ export default async function RouteDetailPage({
       <div className="grid gap-6 lg:grid-cols-2">
         <Card>
           <CardContent>
-            <RouteMap returnToStart={route.returnToStart} routeId={route.id} start={{ lat: route.startLocationLat, lng: route.startLocationLng }} stops={mapStops} />
+            <RouteMap returnToStart={route.returnToStart} routeId={route.awaitingDriverLocation ? undefined : route.id} start={{ lat: route.startLocationLat, lng: route.startLocationLng }} stops={mapStops} />
           </CardContent>
         </Card>
         <Card>
           <CardContent>
-            <RouteStopList startLabel="Gau Bhoomi Naturals" stops={stopViews} />
+            <RouteStopList startLabel={route.awaitingDriverLocation ? "Starting point pending driver GPS" : "Route starting point"} stops={stopViews} />
           </CardContent>
         </Card>
       </div>

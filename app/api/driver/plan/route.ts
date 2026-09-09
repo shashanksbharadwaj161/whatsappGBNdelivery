@@ -11,6 +11,7 @@ export const POST = withApiHandler(async (request: NextRequest) => {
   if (!input.success) throw new ValidationError("A valid current location is required");
   const date = todayBusinessDateString();
   const active = await getActiveRouteForDate(date);
+  if(active?.driverId && active.driverId!==user.userId && user.role!=="OWNER") throw new ValidationError("This round belongs to another driver. Ask the owner to assign your round.");
   if (active) return NextResponse.json(await reoptimizeRoute(active.id, [], user.userId, input.data));
   const orders = await listRoutableOrdersForDate(date);
   if (!orders.length) throw new ValidationError("No confirmed deliveries with resolved addresses are ready for today.");

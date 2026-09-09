@@ -13,12 +13,11 @@ function isAllowedHost(url: URL): boolean {
 /** Pulls lat/lng straight out of a Google Maps URL, no network call. */
 function extractCoordinatesFromUrl(url: URL): { lat: number; lng: number } | null {
   const patterns = [
-    /@(-?\d+\.\d+),(-?\d+\.\d+)/, // .../@12.9716,77.5946,15z
     /!3d(-?\d+\.\d+)!4d(-?\d+\.\d+)/, // place URLs with a pin: !3dLAT!4dLNG
   ];
   for (const pattern of patterns) {
     const match = url.pathname.match(pattern) ?? url.href.match(pattern);
-    if (match) return { lat: Number(match[1]), lng: Number(match[2]) };
+    if (match && Math.abs(Number(match[1]))<=90 && Math.abs(Number(match[2]))<=180) return { lat: Number(match[1]), lng: Number(match[2]) };
   }
 
   const q = url.searchParams.get("q") ?? url.searchParams.get("query");

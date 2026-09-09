@@ -1,4 +1,4 @@
-const GRAPH_API_VERSION = process.env.WHATSAPP_GRAPH_API_VERSION || "v21.0";
+const GRAPH_API_VERSION = process.env.WHATSAPP_GRAPH_API_VERSION || "v25.0";
 
 export type SendResult =
   | { ok: true; waMessageId: string }
