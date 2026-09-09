@@ -1,0 +1,1 @@
+ALTER TABLE "Route" ADD COLUMN "returnToStart" BOOLEAN NOT NULL DEFAULT true;

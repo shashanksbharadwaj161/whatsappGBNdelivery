@@ -1,3 +1,4 @@
+import { db } from "@/lib/db";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 export type UserRole = "OWNER" | "DRIVER";
@@ -32,6 +33,13 @@ export async function requireRole(allowed: UserRole[]) {
     throw new AuthError(403, "Forbidden for this role");
   }
 
+  // Only trusted app_metadata grants roles. Mirror an authorized identity so
+  // order/route foreign keys work without a separate manual Profile insert.
+  await db.profile.upsert({
+    where: { id: user.id },
+    create: { id: user.id, fullName: user.user_metadata?.full_name || user.email || role, role },
+    update: { role },
+  });
   return { userId: user.id, role, email: user.email ?? "" };
 }
 

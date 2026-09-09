@@ -17,12 +17,12 @@ export function LocationPinDropMap({ latitude, longitude, defaultCenter, onPinCh
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<google.maps.Map | null>(null);
   const markerRef = useRef<google.maps.Marker | null>(null);
-  const { configured, loaded } = useGoogleMapsScript();
+  const { configured, loaded, error } = useGoogleMapsScript();
 
   useEffect(() => {
     if (!configured || !loaded || !containerRef.current || mapRef.current) return;
 
-    const center = latitude && longitude ? { lat: latitude, lng: longitude } : defaultCenter;
+    const center = latitude != null && longitude != null ? { lat: latitude, lng: longitude } : defaultCenter;
     const map = new google.maps.Map(containerRef.current, {
       center,
       zoom: 15,
@@ -54,7 +54,7 @@ export function LocationPinDropMap({ latitude, longitude, defaultCenter, onPinCh
     mapRef.current.panTo(pos);
   }, [latitude, longitude]);
 
-  if (configured) {
+  if (configured && !error) {
     return <div ref={containerRef} className="h-48 w-full rounded-lg border border-border" />;
   }
 
@@ -63,7 +63,7 @@ export function LocationPinDropMap({ latitude, longitude, defaultCenter, onPinCh
       center={latitude != null && longitude != null ? { lat: latitude, lng: longitude } : defaultCenter}
       zoom={15}
       draggableMarker={{ lat: latitude, lng: longitude, onChange: onPinChange }}
-      heightClassName="h-48"
+      heightClassName="h-72"
     />
   );
 }

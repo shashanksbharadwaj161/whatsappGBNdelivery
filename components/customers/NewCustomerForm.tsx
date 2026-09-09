@@ -12,6 +12,7 @@ export function NewCustomerForm() {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
@@ -40,10 +41,11 @@ export function NewCustomerForm() {
             setError(null);
             startTransition(async () => {
               try {
-                await createCustomerAction({ name, phone });
+                await createCustomerAction({ name, phone, email: email.trim() || undefined });
                 setOpen(false);
                 setName("");
                 setPhone("");
+                setEmail("");
                 router.refresh();
               } catch (err) {
                 setError(err instanceof Error ? err.message : "Could not create customer");
@@ -65,6 +67,7 @@ export function NewCustomerForm() {
               onChange={(e) => setPhone(e.target.value)}
             />
           </div>
+          <div><Label htmlFor="new-cust-email">Email (optional)</Label><Input id="new-cust-email" type="email" value={email} onChange={e=>setEmail(e.target.value)}/></div>
           {error && <p className="text-sm text-status-cancelled">{error}</p>}
           <Button type="submit" disabled={pending} className="w-full">
             {pending ? "Saving…" : "Save customer"}

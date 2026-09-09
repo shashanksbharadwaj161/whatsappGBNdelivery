@@ -1,3 +1,4 @@
+import { distanceOptimizedOrder } from "./distance-order";
 import { z } from "zod";
 import { nearestNeighborOrder, twoOptImprove, haversineDistanceKm } from "@/lib/geo/haversine";
 import { UpstreamError, ValidationError } from "@/lib/errors";
@@ -11,8 +12,8 @@ const DEV_FALLBACK_AVG_SPEED_KMH = 22;
  * Free, no-key road-routing provider (OSRM). Defaults to the public demo
  * server, which is fine for one driver's handful of daily route
  * calculations; set OSRM_BASE_URL to a self-hosted instance for heavy
- * use. Its /trip service solves the one-vehicle TSP and returns real
- * road distances/durations.
+ * use. Road distance matrices determine stop order; the route service
+ * returns driving distances and durations.
  */
 function osrmBaseUrl(): string {
   return (process.env.OSRM_BASE_URL || "https://router.project-osrm.org").replace(/\/$/, "");
@@ -145,96 +146,35 @@ async function optimizeViaGoogleRoutesApi(
   return { stops, totalDistanceKm, totalDurationMinutes, usedDevFallback: false };
 }
 
-const osrmTripResponseSchema = z.object({
-  code: z.string(),
-  trips: z
-    .array(
-      z.object({
-        distance: z.number(), // meters, whole roundtrip
-        duration: z.number(), // seconds, whole roundtrip
-        legs: z.array(z.object({ distance: z.number(), duration: z.number() })),
-      })
-    )
-    .optional(),
-  waypoints: z.array(z.object({ waypoint_index: z.number() })).optional(),
-});
-
-/**
- * Free road-based optimization via OSRM's /trip service (no API key).
- * Depot is the first coordinate (source=first) and the driver returns to
- * it (roundtrip=true). Returns real road distances/durations.
- */
 async function optimizeViaOsrm(
-  origin: { lat: number; lng: number },
-  waypoints: RouteWaypoint[],
-  startTime: Date
+  origin: { lat: number; lng: number }, waypoints: RouteWaypoint[], startTime: Date, roundTrip = true
 ): Promise<OptimizeRouteResult> {
-  // OSRM coordinate order is lng,lat. Depot first, then the stops.
-  const coords = [origin, ...waypoints.map((w) => ({ lat: w.lat, lng: w.lng }))]
-    .map((c) => `${c.lng},${c.lat}`)
-    .join(";");
-  const url = `${osrmBaseUrl()}/trip/v1/driving/${coords}?source=first&roundtrip=true&overview=false&annotations=false`;
-
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), OSRM_FETCH_TIMEOUT_MS);
-  let res: Response;
-  try {
-    res = await fetch(url, { signal: controller.signal, headers: { "User-Agent": "GauBhoomiNaturals-Delivery/1.0" } });
-  } finally {
-    clearTimeout(timeout);
-  }
-
-  const raw = await res.json().catch(() => null);
-  const parsed = osrmTripResponseSchema.safeParse(raw);
-  if (!res.ok || !parsed.success || parsed.data.code !== "Ok" || !parsed.data.trips?.length || !parsed.data.waypoints) {
-    throw new UpstreamError(`OSRM routing returned an unexpected response (${raw?.code ?? res.status})`);
-  }
-
-  const trip = parsed.data.trips[0];
-  const respWaypoints = parsed.data.waypoints;
-  const expectedCount = waypoints.length + 1;
-  if (respWaypoints.length !== expectedCount || trip.legs.length !== expectedCount) {
-    throw new UpstreamError("OSRM routing response did not match the number of waypoints sent");
-  }
-
-  // waypoint_index gives each input coordinate's position in the optimized
-  // trip. Depot (input 0) is position 0; sort the real stops by position.
-  const ordered = [...waypoints]
-    .map((wp, i) => ({ wp, position: respWaypoints[i + 1].waypoint_index }))
-    .sort((a, b) => a.position - b.position);
-
-  const stops: OptimizedStop[] = [];
-  let cumulativeMs = startTime.getTime();
-
-  ordered.forEach((entry, seq) => {
-    // Leg into optimized position `position` is legs[position - 1].
-    const leg = trip.legs[entry.position - 1];
-    const distanceKm = leg.distance / 1000;
-    const durationMinutes = leg.duration / 60;
-    cumulativeMs += durationMinutes * 60 * 1000;
-    stops.push({
-      id: entry.wp.id,
-      sequenceIndex: seq,
-      distanceFromPreviousKm: distanceKm,
-      durationFromPreviousMinutes: durationMinutes,
-      estimatedArrival: new Date(cumulativeMs),
-    });
+  const points = [origin, ...waypoints];
+  const coords = points.map(c => `${c.lng},${c.lat}`).join(";");
+  const matrixResponse = await fetch(`${osrmBaseUrl()}/table/v1/driving/${coords}?annotations=distance`, { signal: AbortSignal.timeout(OSRM_FETCH_TIMEOUT_MS) });
+  const matrix = z.object({ code: z.literal("Ok"), distances: z.array(z.array(z.number().nonnegative())) }).safeParse(await matrixResponse.json());
+  if (!matrixResponse.ok || !matrix.success || matrix.data.distances.length !== points.length) throw new UpstreamError("Road distances could not be calculated for every stop");
+  const order = distanceOptimizedOrder(matrix.data.distances, roundTrip);
+  const path = [origin, ...order.map(i => points[i]), ...(roundTrip ? [origin] : [])];
+  const response = await fetch(`${osrmBaseUrl()}/route/v1/driving/${path.map(c => `${c.lng},${c.lat}`).join(";")}?overview=false&steps=false`, { signal: AbortSignal.timeout(OSRM_FETCH_TIMEOUT_MS) });
+  const parsed = z.object({ code: z.literal("Ok"), routes: z.array(z.object({ distance: z.number().nonnegative(), duration: z.number().nonnegative(), legs: z.array(z.object({ distance: z.number().nonnegative(), duration: z.number().nonnegative() })) })).min(1) }).safeParse(await response.json());
+  if (!response.ok || !parsed.success) throw new UpstreamError("The road route could not be calculated");
+  const route = parsed.data.routes[0];
+  if (route.legs.length !== path.length - 1) throw new UpstreamError("Road route did not include every stop");
+  let arrival = startTime.getTime();
+  const stops = order.map((pointIndex, sequenceIndex) => {
+    const leg = route.legs[sequenceIndex]; arrival += leg.duration * 1000;
+    return { id: waypoints[pointIndex - 1].id, sequenceIndex, distanceFromPreviousKm: leg.distance / 1000, durationFromPreviousMinutes: leg.duration / 60, estimatedArrival: new Date(arrival) };
   });
-
-  // Trip totals already include the closing leg back to the depot.
-  return {
-    stops,
-    totalDistanceKm: trip.distance / 1000,
-    totalDurationMinutes: trip.duration / 60,
-    usedDevFallback: false,
-  };
+  return { stops, totalDistanceKm: route.distance / 1000, totalDurationMinutes: route.duration / 60, usedDevFallback: false };
 }
 
 /** Straight-line nearest-neighbor ordering — last-resort estimate when no road-routing provider is reachable. */
 function optimizeViaHaversineFallback(
   origin: { lat: number; lng: number },
   waypoints: RouteWaypoint[],
-  startTime: Date
+  startTime: Date,
+  roundTrip = true
 ): OptimizeRouteResult {
   const ordered = twoOptImprove(origin, nearestNeighborOrder(origin, waypoints));
 
@@ -261,7 +201,7 @@ function optimizeViaHaversineFallback(
     previous = point;
   });
 
-  const returnDistanceKm = haversineDistanceKm(previous, origin);
+  const returnDistanceKm = roundTrip ? haversineDistanceKm(previous, origin) : 0;
   totalDistanceKm += returnDistanceKm;
   totalDurationMinutes += (returnDistanceKm / DEV_FALLBACK_AVG_SPEED_KMH) * 60;
 
@@ -271,16 +211,17 @@ function optimizeViaHaversineFallback(
 /**
  * One-driver route optimization, in provider priority order:
  *   1. Google Routes API — when GOOGLE_MAPS_SERVER_API_KEY is set.
- *   2. OSRM /trip — free, no key, real road distances (the default).
+ *   2. OSRM distance matrix and route — free, no key, real road distances (the default).
  *   3. Straight-line nearest-neighbor + 2-opt — last resort if OSRM is
  *      unreachable, flagged usedDevFallback so the UI can say the ETAs
  *      are estimates rather than road data.
- * Every path returns to the depot (round trip).
+ * Return to the starting point is optional.
  */
 export async function optimizeRoute(
   origin: { lat: number; lng: number },
   waypoints: RouteWaypoint[],
-  startTime: Date
+  startTime: Date,
+  roundTrip = true
 ): Promise<OptimizeRouteResult> {
   if (waypoints.length === 0) {
     throw new ValidationError("At least one stop is required to optimize a route");
@@ -289,16 +230,16 @@ export async function optimizeRoute(
     throw new ValidationError(`Route optimization supports at most ${MAX_WAYPOINTS} stops at a time`);
   }
 
-  if (isMapsKeyConfigured()) {
+  if (isMapsKeyConfigured() && roundTrip) {
     return optimizeViaGoogleRoutesApi(origin, waypoints, startTime);
   }
 
   try {
-    return await optimizeViaOsrm(origin, waypoints, startTime);
+    return await optimizeViaOsrm(origin, waypoints, startTime, roundTrip);
   } catch (error) {
     console.warn(
       `[routing] OSRM unavailable (${error instanceof Error ? error.message : "unknown error"}) — falling back to straight-line estimate.`
     );
-    return optimizeViaHaversineFallback(origin, waypoints, startTime);
+    return optimizeViaHaversineFallback(origin, waypoints, startTime, roundTrip);
   }
 }

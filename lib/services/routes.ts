@@ -13,6 +13,7 @@ export interface CreateRouteInput {
   startTime: Date;
   actorUserId?: string;
   driverId?: string;
+  returnToStart?: boolean;
 }
 
 function milkQuantityLabel(order: { milkSize: string; quantity: number; customQuantityLiters: number | null }) {
@@ -87,7 +88,7 @@ export async function createOptimizedRoute(input: CreateRouteInput) {
 
   const waypoints: RouteWaypoint[] = orders.map((o) => ({ id: o.id, lat: o.address.latitude!, lng: o.address.longitude! }));
 
-  const result = await optimizeRoute({ lat: input.startLat, lng: input.startLng }, waypoints, input.startTime);
+  const result = await optimizeRoute({ lat: input.startLat, lng: input.startLng }, waypoints, input.startTime, input.returnToStart ?? true);
 
   const ordersById = new Map(orders.map((o) => [o.id, o]));
 
@@ -96,6 +97,7 @@ export async function createOptimizedRoute(input: CreateRouteInput) {
       data: {
         date: deliveryDate,
         driverId: input.driverId,
+        returnToStart: input.returnToStart ?? true,
         startLocationLat: input.startLat,
         startLocationLng: input.startLng,
         plannedDistanceKm: result.totalDistanceKm,
@@ -147,7 +149,8 @@ export async function getRouteDetail(routeId: string) {
 export async function reoptimizeRoute(
   routeId: string,
   additionalOrderIds: string[],
-  actorUserId?: string
+  actorUserId?: string,
+  currentLocation?: { lat: number; lng: number }
 ) {
   const current = await getRouteDetail(routeId);
   if (current.status !== "PLANNED" && current.status !== "IN_PROGRESS") {
@@ -199,12 +202,12 @@ export async function reoptimizeRoute(
   // Re-optimize from the last completed stop's location, or the
   // original depot if the driver hasn't delivered anything yet.
   const lastSettled = [...settledStops].reverse().find((s) => s.status === "DELIVERED");
-  const origin = lastSettled
+  const origin = currentLocation ?? (lastSettled
     ? { lat: lastSettled.latitudeSnapshot, lng: lastSettled.longitudeSnapshot }
-    : { lat: current.startLocationLat, lng: current.startLocationLng };
+    : { lat: current.startLocationLat, lng: current.startLocationLng });
 
   const waypoints: RouteWaypoint[] = orders.map((o) => ({ id: o.id, lat: o.address.latitude!, lng: o.address.longitude! }));
-  const result = await optimizeRoute(origin, waypoints, new Date());
+  const result = await optimizeRoute(origin, waypoints, new Date(), current.returnToStart);
   const ordersById = new Map(orders.map((o) => [o.id, o]));
 
   const newRoute = await db.$transaction(async (tx) => {
@@ -212,8 +215,9 @@ export async function reoptimizeRoute(
       data: {
         date: current.date,
         driverId: current.driverId,
-        startLocationLat: current.startLocationLat,
-        startLocationLng: current.startLocationLng,
+        startLocationLat: origin.lat,
+        startLocationLng: origin.lng,
+        returnToStart: current.returnToStart,
         startedAt: current.startedAt,
         plannedDistanceKm: result.totalDistanceKm,
         plannedDurationMinutes: Math.round(result.totalDurationMinutes),

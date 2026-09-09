@@ -11,14 +11,16 @@ import type { ConversationStatus, MessageType } from "@prisma/client";
  * with no matching Customer is still fully usable from the Inbox.
  */
 export async function recordInboundMessage(message: NormalizedInboundMessage) {
+  return db.$transaction(async (tx) => {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${message.waId}))`;
   const existingMessage = message.waMessageId
-    ? await db.whatsappMessage.findUnique({ where: { waMessageId: message.waMessageId } })
+    ? await tx.whatsappMessage.findUnique({ where: { waMessageId: message.waMessageId } })
     : null;
   if (existingMessage) return existingMessage;
 
-  const matchingCustomer = await db.customer.findUnique({ where: { phone: `+${message.waId}` } });
+  const matchingCustomer = await tx.customer.findUnique({ where: { phone: `+${message.waId}` } });
 
-  const conversation = await db.whatsappConversation.upsert({
+  const conversation = await tx.whatsappConversation.upsert({
     where: { waId: message.waId },
     update: {
       displayName: message.displayName ?? undefined,
@@ -35,7 +37,7 @@ export async function recordInboundMessage(message: NormalizedInboundMessage) {
     },
   });
 
-  return db.whatsappMessage.create({
+  return tx.whatsappMessage.create({
     data: {
       conversationId: conversation.id,
       direction: "INBOUND",
@@ -49,6 +51,7 @@ export async function recordInboundMessage(message: NormalizedInboundMessage) {
       status: "DELIVERED",
       createdAt: message.timestamp,
     },
+  });
   });
 }
 

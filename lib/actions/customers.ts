@@ -7,6 +7,7 @@ import * as customersService from "@/lib/services/customers";
 export async function createCustomerAction(input: {
   name: string;
   phone: string;
+  email?: string;
   alternatePhone?: string;
   notes?: string;
 }) {

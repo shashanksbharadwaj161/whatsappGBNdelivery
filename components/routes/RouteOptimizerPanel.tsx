@@ -1,5 +1,8 @@
 "use client";
 
+import { getCurrentLocation } from "@/lib/maps/current-location";
+import { LocationPinDropMap } from "@/components/maps/LocationPinDropMap";
+import { businessDateAndTimeToUtc, todayBusinessDateString, formatBusinessTime } from "@/lib/tz";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Route as RouteIcon } from "lucide-react";
@@ -32,8 +35,10 @@ export function RouteOptimizerPanel({
   const [startTime, setStartTime] = useState(() => {
     const now = new Date();
     now.setMinutes(now.getMinutes() + 15);
-    return `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
+    return formatBusinessTime(now, "HH:mm");
   });
+  const [locating, setLocating] = useState(false);
+  const [returnToStart, setReturnToStart] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -50,15 +55,14 @@ export function RouteOptimizerPanel({
     setLoading(true);
     setError(null);
     try {
-      const [hh, mm] = startTime.split(":").map(Number);
-      const startDateTime = new Date();
-      startDateTime.setHours(hh, mm, 0, 0);
+      const startDateTime = businessDateAndTimeToUtc(todayBusinessDateString(), startTime);
 
       const res = await fetch("/api/routes/optimize", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           orderIds: Array.from(selected),
+          returnToStart,
           startLat: Number(startLat),
           startLng: Number(startLng),
           startTime: startDateTime.toISOString(),
@@ -80,6 +84,10 @@ export function RouteOptimizerPanel({
   return (
     <Card>
       <CardContent className="space-y-4">
+        <div><h2 className="font-display text-xl">Plan your delivery round</h2><p className="mt-1 text-sm text-ink-muted">Start from your current location or move the pin. We’ll order the selected stops using road distances.</p></div>
+        <Button variant="outline" disabled={locating} onClick={async()=>{setLocating(true);setError(null);try{const p=await getCurrentLocation();setStartLat(String(p.lat));setStartLng(String(p.lng));}catch(e){setError(e instanceof Error?e.message:"Location unavailable");}finally{setLocating(false);}}}>{locating?"Finding your location…":"Use my current location"}</Button>
+        <LocationPinDropMap latitude={Number(startLat)} longitude={Number(startLng)} defaultCenter={defaultStart} onPinChange={p=>{setStartLat(String(p.lat));setStartLng(String(p.lng));}} />
+        <label className="flex min-h-11 items-center gap-3 text-sm"><input type="checkbox" checked={returnToStart} onChange={e=>setReturnToStart(e.target.checked)}/>Return to the starting point after the last delivery</label>
         <div className="grid gap-3 md:grid-cols-3">
           <div>
             <Label htmlFor="startLat">Starting point (lat)</Label>
@@ -90,7 +98,7 @@ export function RouteOptimizerPanel({
             <Input id="startLng" type="number" step="any" value={startLng} onChange={(e) => setStartLng(e.target.value)} />
           </div>
           <div>
-            <Label htmlFor="startTime">Starting time</Label>
+            <Label htmlFor="startTime">Starting time (IST)</Label>
             <Input id="startTime" type="time" value={startTime} onChange={(e) => setStartTime(e.target.value)} />
           </div>
         </div>
@@ -100,7 +108,7 @@ export function RouteOptimizerPanel({
           <p className="mb-2 text-sm font-medium text-ink">Orders to deliver ({selected.size} selected)</p>
           <div className="max-h-72 divide-y divide-border overflow-y-auto rounded-lg border border-border">
             {orders.map((o) => (
-              <label key={o.id} className="flex cursor-pointer items-center gap-3 px-3 py-2 text-sm hover:bg-surface-alt">
+              <label key={o.id} className="flex min-h-14 cursor-pointer flex-wrap items-center gap-3 px-3 py-2 text-sm hover:bg-surface-alt">
                 <input
                   type="checkbox"
                   checked={selected.has(o.id)}
@@ -116,7 +124,7 @@ export function RouteOptimizerPanel({
           </div>
         </div>
 
-        {error && <p className="text-sm text-status-cancelled">{error}</p>}
+        {error && <p role="alert" className="text-sm text-status-cancelled">{error}</p>}
         <Button disabled={loading || selected.size === 0} onClick={handleOptimize}>
           <RouteIcon size={16} /> {loading ? "Optimizing…" : "Optimize route"}
         </Button>

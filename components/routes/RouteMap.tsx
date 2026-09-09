@@ -1,5 +1,7 @@
 "use client";
 
+import { createDeliveryPopup, type DeliveryDetails } from "@/components/maps/popup";
+import { useRoadGeometry } from "@/lib/maps/useRoadGeometry";
 import { useEffect, useRef } from "react";
 import { useGoogleMapsScript } from "@/lib/maps/useGoogleMapsScript";
 import { LeafletMap, type LeafletMarker } from "@/components/maps/LeafletMap";
@@ -11,6 +13,7 @@ export interface RouteMapStop {
   lng: number;
   status: "PENDING" | "EN_ROUTE" | "DELIVERED" | "SKIPPED" | "UNAVAILABLE";
   customerName: string;
+  details?: DeliveryDetails;
 }
 
 export const PIN_COLORS: Record<RouteMapStop["status"], string> = {
@@ -24,14 +27,19 @@ export const PIN_COLORS: Record<RouteMapStop["status"], string> = {
 export function RouteMap({
   start,
   stops,
-  heightClassName = "h-64",
+  routeId,
+  returnToStart = true,
+  heightClassName = "h-80",
 }: {
   start: { lat: number; lng: number };
   stops: RouteMapStop[];
+  routeId?: string;
+  returnToStart?: boolean;
   heightClassName?: string;
 }) {
+  const road = useRoadGeometry(routeId);
   const containerRef = useRef<HTMLDivElement>(null);
-  const { configured, loaded } = useGoogleMapsScript();
+  const { configured, loaded, error } = useGoogleMapsScript();
 
   useEffect(() => {
     if (!configured || !loaded || !containerRef.current) return;
@@ -42,7 +50,7 @@ export function RouteMap({
       zoom: 12,
       streetViewControl: false,
       mapTypeControl: false,
-      fullscreenControl: false,
+      fullscreenControl: true,
     });
 
     new google.maps.Marker({
@@ -56,7 +64,7 @@ export function RouteMap({
     const path: google.maps.LatLngLiteral[] = [start];
     for (const stop of stops) {
       const position = { lat: stop.lat, lng: stop.lng };
-      new google.maps.Marker({
+      const marker = new google.maps.Marker({
         map,
         position,
         label: { text: String(stop.stopNumber), color: "white", fontSize: "12px" },
@@ -69,31 +77,34 @@ export function RouteMap({
         },
         title: `${stop.stopNumber}. ${stop.customerName}`,
       });
+      const detail = createDeliveryPopup(`${stop.stopNumber}. ${stop.customerName}`, stop.details);
+      const popup = new google.maps.InfoWindow({ content: detail });
+      marker.addListener("click", () => popup.open({ map, anchor: marker }));
       bounds.extend(position);
       path.push(position);
     }
-    path.push(start);
+    if (returnToStart) path.push(start);
 
     new google.maps.Polyline({
       map,
-      path,
+      path: road ?? path,
       strokeColor: "#1f4b36",
       strokeOpacity: 0.6,
       strokeWeight: 3,
     });
 
     if (stops.length > 0) map.fitBounds(bounds, 48);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [configured, loaded, start.lat, start.lng, stops.length]);
+    return () => { google.maps.event.clearInstanceListeners(map); };
+  }, [configured, loaded, start, stops, road, returnToStart]);
 
   // Google Maps when a key is configured; otherwise the key-free
   // Leaflet/OpenStreetMap map so the route is always visible.
-  if (configured) {
-    return <div ref={containerRef} className={`${heightClassName} w-full rounded-lg border border-border`} />;
+  if (configured && !error) {
+    return <div><div ref={containerRef} className={`${heightClassName} w-full rounded-lg border border-border`} /><p className="mt-2 text-xs text-ink-muted">{road ? "OpenStreetMap road preview. Use Navigate for driving directions." : "Lines show stop order only, not driving directions."}</p></div>;
   }
 
   const markers: LeafletMarker[] = [
-    { id: "start", lat: start.lat, lng: start.lng, label: "S", color: "#1f4b36", title: "Start · Gau Bhoomi Naturals" },
+    { id: "start", lat: start.lat, lng: start.lng, label: "S", color: "#1f4b36", title: "Route start" },
     ...stops.map((s) => ({
       id: s.id,
       lat: s.lat,
@@ -101,17 +112,22 @@ export function RouteMap({
       label: String(s.stopNumber),
       color: PIN_COLORS[s.status],
       title: `${s.stopNumber}. ${s.customerName}`,
+      details: s.details,
     })),
   ];
-  const polyline = [start, ...stops.map((s) => ({ lat: s.lat, lng: s.lng })), start];
+  const polyline = [start, ...stops.map((s) => ({ lat: s.lat, lng: s.lng })), ...(returnToStart ? [start] : [])];
 
   return (
+    <div>
     <LeafletMap
       center={start}
       markers={markers}
-      polyline={stops.length > 0 ? polyline : undefined}
+      polyline={road ?? (stops.length > 0 ? polyline : undefined)}
+      roadPath={Boolean(road)}
       fitToMarkers
       heightClassName={heightClassName}
     />
+    <p className="mt-2 text-xs text-ink-muted">{road ? "OpenStreetMap road preview · Tap a pin for details. Use Navigate for turn-by-turn directions." : "Road preview unavailable. Dashed lines show stop order, not driving directions."}</p>
+    </div>
   );
 }

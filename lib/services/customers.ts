@@ -1,3 +1,5 @@
+import { z } from "zod";
+import { ValidationError } from "@/lib/errors";
 import { db } from "@/lib/db";
 import { recordAudit } from "@/lib/audit";
 import { NotFoundError, ConflictError } from "@/lib/errors";
@@ -6,6 +8,7 @@ import { normalizePhoneToE164 } from "@/lib/phone";
 export interface CreateCustomerInput {
   name: string;
   phone: string;
+  email?: string;
   alternatePhone?: string;
   notes?: string;
   actorUserId?: string;
@@ -14,14 +17,19 @@ export interface CreateCustomerInput {
 /** Always find-or-create by normalized phone — never a silent duplicate. */
 export async function findOrCreateCustomerByPhone(input: CreateCustomerInput) {
   const phone = normalizePhoneToE164(input.phone);
+  if (input.email && !z.email().safeParse(input.email).success) throw new ValidationError("Enter a valid email address");
 
   const existing = await db.customer.findUnique({ where: { phone } });
-  if (existing) return existing;
+  if (existing) {
+    if (input.email) return db.customer.update({ where: { id: existing.id }, data: { email: input.email } });
+    return existing;
+  }
 
   const customer = await db.customer.create({
     data: {
       name: input.name,
       phone,
+      email: input.email,
       alternatePhone: input.alternatePhone,
       notes: input.notes,
     },
@@ -94,6 +102,7 @@ export async function getCustomerDetail(customerId: string) {
 export interface UpdateCustomerInput {
   name?: string;
   phone?: string;
+  email?: string;
   alternatePhone?: string;
   notes?: string;
   isActive?: boolean;
@@ -104,6 +113,7 @@ export async function updateCustomer(customerId: string, input: UpdateCustomerIn
   const existing = await db.customer.findUnique({ where: { id: customerId } });
   if (!existing) throw new NotFoundError("Customer not found");
 
+  if (input.email && !z.email().safeParse(input.email).success) throw new ValidationError("Enter a valid email address");
   const normalizedPhone = input.phone ? normalizePhoneToE164(input.phone) : undefined;
   if (normalizedPhone && normalizedPhone !== existing.phone) {
     const phoneTaken = await db.customer.findUnique({ where: { phone: normalizedPhone } });
@@ -121,6 +131,7 @@ export async function updateCustomer(customerId: string, input: UpdateCustomerIn
     data: {
       name: input.name,
       phone: normalizedPhone,
+      email: input.email,
       alternatePhone: input.alternatePhone,
       notes: input.notes,
       isActive: input.isActive,

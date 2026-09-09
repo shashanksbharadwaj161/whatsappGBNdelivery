@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Fraunces, Manrope } from "next/font/google";
 import "./globals.css";
 
@@ -12,6 +12,8 @@ const manrope = Manrope({
   variable: "--font-body",
   subsets: ["latin"],
 });
+
+export const viewport: Viewport = { width: "device-width", initialScale: 1, viewportFit: "cover", themeColor: "#1f4b36" };
 
 export const metadata: Metadata = {
   title: "Gau Bhoomi Naturals — Delivery",

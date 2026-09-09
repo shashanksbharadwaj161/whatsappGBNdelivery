@@ -1,4 +1,4 @@
-import { Card, CardContent } from "@/components/ui/Card";
+import { PlanFromLocation } from "@/components/driver/PlanFromLocation";
 import { DriverRouteView, type DriverStopView } from "@/components/driver/DriverRouteView";
 import { getDriverRouteForDate } from "@/lib/services/driver";
 import { formatBusinessTime } from "@/lib/tz";
@@ -8,12 +8,7 @@ export default async function DriverHomePage() {
 
   if (!route) {
     return (
-      <Card>
-        <CardContent className="text-center text-sm text-ink-muted">
-          No route has been planned for today yet — check back once the admin generates one from the
-          Routes tab.
-        </CardContent>
-      </Card>
+      <div className="space-y-4"><h2 className="font-display text-2xl">Ready for your round?</h2><p className="text-sm text-ink-muted">Plan today’s confirmed orders from where you are now.</p><PlanFromLocation /></div>
     );
   }
 
@@ -22,6 +17,8 @@ export default async function DriverHomePage() {
     stopNumber: stop.stopNumber,
     customerName: stop.customerNameSnapshot,
     customerPhone: stop.order.customer.phone,
+    customerEmail: stop.order.customer.email,
+    product: "A2 milk",
     area: stop.order.address.area,
     address: stop.addressTextSnapshot,
     quantity: stop.quantitySnapshot,

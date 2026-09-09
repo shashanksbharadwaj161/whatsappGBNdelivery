@@ -97,3 +97,29 @@ body {
 .animate-success-pop {
   animation: success-pop 320ms ease-out;
 }
+
+/* Mobile controls share a generous target and a visible keyboard focus. */
+button, a, input, select, textarea { -webkit-tap-highlight-color: transparent; }
+:focus-visible { outline: 3px solid var(--color-primary); outline-offset: 3px; }
+.map-tool { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 44px; min-width: 44px; padding: 8px 10px; border: 1px solid var(--color-border); border-radius: 10px; background: var(--color-surface); color: var(--color-ink); font-size: 13px; font-weight: 600; cursor: pointer; }
+.map-tool:disabled { opacity: .5; cursor: wait; }
+.map-tool:hover { background: var(--color-surface-alt); }
+.delivery-map-marker { display: flex; align-items: center; justify-content: center; }
+.delivery-map-pin { display: flex; align-items: center; justify-content: center; width: 32px; height: 32px; border-radius: 50%; color: white; font-size: 13px; font-weight: 700; border: 2px solid white; box-shadow: 0 2px 5px #0003; }
+.delivery-map-pin-selected { outline: 3px solid var(--color-primary); outline-offset: 2px; }
+.leaflet-container .leaflet-control-zoom a { width: 44px; height: 44px; line-height: 44px; }
+.leaflet-container { font-family: inherit; }
+.leaflet-popup-content { font-size: 14px; line-height: 1.5; }
+@media (max-width: 767px) {
+  input, select, textarea { font-size: 16px !important; }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; scroll-behavior: auto !important; }
+}
+
+.delivery-popup { width: min(250px, 62vw); color: var(--color-ink); }
+.delivery-popup strong { display: block; font-size: 16px; padding-bottom: 8px; }
+.delivery-popup dl { display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 6px 8px; margin: 0; }
+.delivery-popup dt { color: var(--color-ink-muted); font-size: 12px; }
+.delivery-popup dd { margin: 0; overflow-wrap: anywhere; font-size: 13px; }
+.delivery-popup a { display: inline-flex; align-items: center; min-height: 44px; font-weight: 600; margin-top: 8px; }

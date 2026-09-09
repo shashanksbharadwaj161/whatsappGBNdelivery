@@ -24,6 +24,7 @@ export default async function RouteDetailPage({
     id: stop.id,
     stopNumber: stop.stopNumber,
     customerName: stop.customerNameSnapshot,
+    details: { name: stop.customerNameSnapshot, phone: stop.order.customer.phone, email: stop.order.customer.email, product: "A2 milk", quantity: stop.quantitySnapshot, address: stop.addressTextSnapshot },
     address: stop.addressTextSnapshot,
     quantity: stop.quantitySnapshot,
     status: stop.status,
@@ -38,6 +39,7 @@ export default async function RouteDetailPage({
     lng: stop.longitudeSnapshot,
     status: stop.status,
     customerName: stop.customerNameSnapshot,
+    details: { name: stop.customerNameSnapshot, phone: stop.order.customer.phone, email: stop.order.customer.email, product: "A2 milk", quantity: stop.quantitySnapshot, address: stop.addressTextSnapshot },
   }));
 
   const lastStop = route.stops[route.stops.length - 1];
@@ -92,7 +94,7 @@ export default async function RouteDetailPage({
       <div className="grid gap-6 lg:grid-cols-2">
         <Card>
           <CardContent>
-            <RouteMap start={{ lat: route.startLocationLat, lng: route.startLocationLng }} stops={mapStops} />
+            <RouteMap returnToStart={route.returnToStart} routeId={route.id} start={{ lat: route.startLocationLat, lng: route.startLocationLng }} stops={mapStops} />
           </CardContent>
         </Card>
         <Card>

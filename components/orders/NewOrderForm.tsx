@@ -26,6 +26,7 @@ export function NewOrderForm({
   const [error, setError] = useState<string | null>(null);
 
   const [customerName, setCustomerName] = useState(prefill?.customerName ?? "");
+  const [email, setEmail] = useState("");
   const [phone, setPhone] = useState(prefill?.phone ?? "");
   const [milkSize, setMilkSize] = useState<MilkSize>("L1");
   const [customQuantityLiters, setCustomQuantityLiters] = useState("");
@@ -136,7 +137,7 @@ export function NewOrderForm({
     startTransition(async () => {
       try {
         const order = await createOrderAction({
-          customer: { name: customerName, phone },
+          customer: { name: customerName, phone, email: email.trim() || undefined },
           address: {
             formattedAddress,
             landmark: landmark || null,
@@ -172,6 +173,7 @@ export function NewOrderForm({
       <Card>
         <CardContent className="space-y-4">
           <p className="font-medium text-ink">Customer</p>
+          <div><Label htmlFor="customerEmail">Email (optional)</Label><Input id="customerEmail" type="email" autoComplete="email" value={email} onChange={e => setEmail(e.target.value)} /></div>
           <div>
             <Label htmlFor="customerName">Name</Label>
             <Input id="customerName" required value={customerName} onChange={(e) => setCustomerName(e.target.value)} />

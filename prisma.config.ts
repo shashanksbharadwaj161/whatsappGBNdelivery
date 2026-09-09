@@ -1,5 +1,6 @@
+import { getDatabaseUrl } from "./lib/database-url";
 import { config as loadEnv } from "dotenv";
-import { defineConfig, env } from "prisma/config";
+import { defineConfig } from "prisma/config";
 
 // Next.js conventionally uses .env.local; plain dotenv defaults to .env.
 // Load both (local wins) so `prisma migrate`/`prisma studio` see the same
@@ -19,6 +20,6 @@ export default defineConfig({
   },
   datasource: {
     // Migrate needs the *direct* (non-pooled) connection.
-    url: env("DIRECT_URL"),
+    url: getDatabaseUrl(true),
   },
 });

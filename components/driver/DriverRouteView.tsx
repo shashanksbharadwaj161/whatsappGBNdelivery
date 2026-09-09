@@ -1,5 +1,7 @@
 "use client";
 
+import { PlanFromLocation } from "./PlanFromLocation";
+import { useRoadGeometry } from "@/lib/maps/useRoadGeometry";
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import {
@@ -23,6 +25,8 @@ export interface DriverStopView {
   stopNumber: number;
   customerName: string;
   customerPhone: string;
+  customerEmail?: string | null;
+  product?: string;
   area: string | null;
   address: string;
   quantity: string;
@@ -56,11 +60,14 @@ export function DriverRouteView({
   stops: DriverStopView[];
 }) {
   const router = useRouter();
+  const road = useRoadGeometry(routeId);
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [mode, setMode] = useState<Mode>("idle");
   const [justDelivered, setJustDelivered] = useState(false);
   const [showAllStops, setShowAllStops] = useState(false);
+  const [selectedStopId, setSelectedStopId] = useState<string>();
+  const selectedStop = stops.find(stop => stop.id === selectedStopId);
 
   const completedCount = stops.filter((s) => s.status !== "PENDING" && s.status !== "EN_ROUTE").length;
   const nextStop = stops.find((s) => s.status === "PENDING" || s.status === "EN_ROUTE");
@@ -74,6 +81,7 @@ export function DriverRouteView({
     color: PIN_COLORS[s.status],
     title: `${s.stopNumber}. ${s.customerName}`,
     emphasized: nextStop?.id === s.id,
+    details: { name: s.customerName, phone: s.customerPhone, email: s.customerEmail, product: s.product ?? "A2 milk", quantity: s.quantity, address: s.address },
   }));
   const mapCenter = nextStop
     ? { lat: nextStop.latitude, lng: nextStop.longitude }
@@ -84,6 +92,7 @@ export function DriverRouteView({
   function handleStart() {
     setError(null);
     startTransition(async () => {
+      try {
       const res = await fetch(`/api/routes/${routeId}/start`, { method: "POST" });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
@@ -91,12 +100,14 @@ export function DriverRouteView({
         return;
       }
       router.refresh();
+      } catch { setError("Connection lost. Refresh to check whether the route started, then try again."); }
     });
   }
 
   function submitStopAction(stopId: string, status: "DELIVERED" | "SKIPPED" | "UNAVAILABLE", failureReason?: string) {
     setError(null);
     startTransition(async () => {
+      try {
       const res = await fetch(`/api/driver/stops/${stopId}/status`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -119,6 +130,7 @@ export function DriverRouteView({
         setMode("idle");
         router.refresh();
       }
+      } catch { setError("Could not confirm the update. Check your connection and refresh before trying again."); setMode("idle"); }
     });
   }
 
@@ -138,7 +150,8 @@ export function DriverRouteView({
       </div>
 
       <div className="space-y-4 pb-36">
-        {error && <p className="rounded-lg bg-status-cancelled-soft px-3 py-2 text-sm text-status-cancelled">{error}</p>}
+        {(routeStatus === "PLANNED" || routeStatus === "IN_PROGRESS") && <PlanFromLocation routeId={routeId} />}
+        {error && <p role="alert" className="rounded-lg bg-status-cancelled-soft px-3 py-2 text-sm text-status-cancelled">{error}</p>}
 
         {routeStatus === "PLANNED" && (
           <div className="rounded-xl border border-border bg-surface p-4 text-center">
@@ -151,7 +164,7 @@ export function DriverRouteView({
           </div>
         )}
 
-        {routeStatus !== "PLANNED" && nextStop && (
+        {routeStatus === "IN_PROGRESS" && nextStop && (
           <div className="rounded-2xl border border-primary/30 bg-primary-soft p-4">
             <div className="mb-1 flex items-center justify-between">
               <p className="text-xs font-semibold uppercase tracking-wide text-primary">Next stop</p>
@@ -159,7 +172,7 @@ export function DriverRouteView({
             </div>
             <p className="font-display text-2xl leading-tight text-ink">{nextStop.customerName}</p>
             <p className="mt-0.5 text-base text-ink">{nextStop.quantity}</p>
-            <p className="text-sm text-ink-muted">{nextStop.area ?? nextStop.address}</p>
+            <p className="text-sm text-ink-muted">{nextStop.address}</p>
 
             <div className="mt-4 grid grid-cols-3 gap-2">
               <a
@@ -191,7 +204,7 @@ export function DriverRouteView({
           </div>
         )}
 
-        {routeStatus !== "PLANNED" && !nextStop && stops.length > 0 && (
+        {routeStatus === "COMPLETED" && !nextStop && stops.length > 0 && (
           <div className="rounded-2xl border border-primary/30 bg-primary-soft p-8 text-center">
             <PartyPopper size={32} className="mx-auto mb-2 text-primary" />
             <p className="font-display text-lg text-ink">All caught up!</p>
@@ -200,22 +213,35 @@ export function DriverRouteView({
         )}
 
         {stops.length > 0 && (
-          <LeafletMap center={mapCenter} markers={mapMarkers} fitToMarkers heightClassName="h-52" />
+          <div>
+            <LeafletMap center={mapCenter} markers={mapMarkers} fitToMarkers heightClassName="h-80" polyline={road} roadPath selectedMarkerId={selectedStopId} onMarkerSelect={setSelectedStopId} />
+            <p className="mt-2 text-xs text-ink-muted">{road ? "OpenStreetMap road preview. Use Navigate for driving directions." : "Road preview unavailable. Tap a delivery pin or use Navigate."}</p>
+            {selectedStop && <div className="mt-3 rounded-xl bg-surface-alt p-4">
+              <p className="font-semibold">Stop {selectedStop.stopNumber} · {selectedStop.customerName}</p>
+              <p className="mt-1 text-sm text-ink-muted">{selectedStop.address}</p>
+              <p className="mt-1 text-sm">{selectedStop.quantity} · {ROUTE_STOP_STATUS_STYLE[selectedStop.status].label}</p>
+              <a className="mt-2 inline-flex min-h-11 items-center gap-2 font-semibold text-primary" target="_blank" rel="noreferrer" href={`https://www.google.com/maps/dir/?api=1&destination=${selectedStop.latitude},${selectedStop.longitude}&travelmode=driving`}><Navigation size={18} /> Navigate to this stop</a>
+            </div>}
+          </div>
         )}
 
         {stops.length > 0 && (
           <div className="flex gap-2 overflow-x-auto pb-1">
             {stops.map((s) => (
-              <div
+              <button
+                type="button"
+                onClick={() => setSelectedStopId(s.id)}
+                aria-label={`Show stop ${s.stopNumber}: ${s.customerName}`}
+                aria-pressed={selectedStopId === s.id}
                 key={s.id}
                 className={cn(
-                  "flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-semibold",
+                  "flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-xs font-semibold",
                   STEPPER_TONE[s.status],
                   nextStop?.id === s.id && "ring-2 ring-primary ring-offset-2 ring-offset-bg"
                 )}
               >
                 {s.stopNumber}
-              </div>
+              </button>
             ))}
           </div>
         )}
@@ -224,8 +250,9 @@ export function DriverRouteView({
           <div>
             <button
               type="button"
+              aria-expanded={showAllStops}
               onClick={() => setShowAllStops((v) => !v)}
-              className="flex w-full items-center justify-center gap-1 py-1 text-sm font-medium text-ink-muted"
+              className="flex w-full items-center justify-center gap-1 min-h-11 py-1 text-sm font-medium text-ink-muted"
             >
               {showAllStops ? "Hide full stop list" : `View all ${stops.length} stops`}
               {showAllStops ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
@@ -255,7 +282,7 @@ export function DriverRouteView({
       </div>
 
       {/* Fixed bottom action bar — thumb zone, always reachable one-handed. */}
-      {routeStatus !== "PLANNED" && nextStop && (
+      {routeStatus === "IN_PROGRESS" && nextStop && (
         <div
           className="fixed inset-x-0 bottom-0 z-40 mx-auto max-w-md border-t border-border bg-surface px-4 pt-3 shadow-[0_-4px_16px_rgba(0,0,0,0.08)]"
           style={{ paddingBottom: "calc(env(safe-area-inset-bottom, 0px) + 0.75rem)" }}

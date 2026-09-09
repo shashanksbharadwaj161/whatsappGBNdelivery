@@ -16,6 +16,8 @@ export default async function DriverRoutePage({
     stopNumber: stop.stopNumber,
     customerName: stop.customerNameSnapshot,
     customerPhone: stop.order.customer.phone,
+    customerEmail: stop.order.customer.email,
+    product: "A2 milk",
     area: stop.order.address.area,
     address: stop.addressTextSnapshot,
     quantity: stop.quantitySnapshot,

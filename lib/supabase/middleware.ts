@@ -63,7 +63,7 @@ export async function updateSession(request: NextRequest) {
     }
     // Logged in, just the wrong role for this area — send them home
     // instead of bouncing to /login (which they'd already be past).
-    const home = role === "DRIVER" ? "/driver" : "/dashboard";
+    const home = role === "DRIVER" ? "/driver" : role === "OWNER" ? "/dashboard" : "/login";
     return NextResponse.redirect(new URL(home, request.url));
   }
 

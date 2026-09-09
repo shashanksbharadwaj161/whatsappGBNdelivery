@@ -6,9 +6,9 @@ import { RunGenerationButton } from "@/components/settings/RunGenerationButton";
 import { getDefaultStartLocation } from "@/lib/services/settings";
 import { PRICE_PER_500ML, PRICE_PER_LITRE, DELIVERY_FEE } from "@/lib/pricing";
 
-function isConfigured(value: string | undefined, placeholders: string[] = ["", "placeholder"]) {
+function isConfigured(value: string | undefined, placeholders: string[] = ["placeholder", "your-", "[PROJECT-REF]"]) {
   if (!value) return false;
-  return !placeholders.some((p) => value.toLowerCase().includes(p));
+  return !placeholders.some((p) => p.length > 0 && value.toLowerCase().includes(p.toLowerCase()));
 }
 
 export default async function SettingsPage() {
@@ -18,7 +18,7 @@ export default async function SettingsPage() {
     { name: "Google Maps (browser)", configured: isConfigured(process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY) },
     { name: "Google Maps (server / routing)", configured: isConfigured(process.env.GOOGLE_MAPS_SERVER_API_KEY) },
     { name: "WhatsApp Cloud API", configured: isConfigured(process.env.WHATSAPP_ACCESS_TOKEN) },
-    { name: "Supabase Auth", configured: isConfigured(process.env.NEXT_PUBLIC_SUPABASE_URL, ["", "placeholder.supabase.co"]) },
+    { name: "Supabase Auth", configured: isConfigured(process.env.NEXT_PUBLIC_SUPABASE_URL, ["placeholder.supabase.co", "[PROJECT-REF]"]) },
   ];
 
   return (

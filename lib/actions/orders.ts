@@ -9,7 +9,7 @@ import { createAddress, type CreateAddressInput } from "@/lib/services/addresses
 import type { DeliveryWindow, MilkSize, OrderSource, OrderType, PaymentStatus } from "@prisma/client";
 
 export interface CreateOrderActionInput {
-  customer: { name: string; phone: string };
+  customer: { name: string; phone: string; email?: string };
   address: Omit<CreateAddressInput, "customerId">;
   milkSize: MilkSize;
   customQuantityLiters?: number | null;
@@ -32,6 +32,7 @@ export async function createOrderAction(input: CreateOrderActionInput) {
   const customer = await customersService.findOrCreateCustomerByPhone({
     name: input.customer.name,
     phone: input.customer.phone,
+    email: input.customer.email,
     actorUserId: user.userId,
   });
 

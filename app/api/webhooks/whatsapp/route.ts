@@ -9,20 +9,14 @@ export async function GET(request: NextRequest) {
   const token = searchParams.get("hub.verify_token");
   const challenge = searchParams.get("hub.challenge");
 
-  if (mode === "subscribe" && token === process.env.WHATSAPP_VERIFY_TOKEN && challenge) {
+  if (process.env.WHATSAPP_VERIFY_TOKEN && mode === "subscribe" && token === process.env.WHATSAPP_VERIFY_TOKEN && challenge) {
     return new NextResponse(challenge, { status: 200 });
   }
 
   return new NextResponse("Forbidden", { status: 403 });
 }
 
-/**
- * Inbound message/status webhook. Always acks 200 once the signature is
- * verified — Meta retries aggressively on non-2xx, and a single bad
- * message in a batch must not fail the rest, so each item is processed
- * in its own try/catch. Never loses an order-relevant message silently:
- * failures here are logged server-side for follow-up.
- */
+/** Persist each item idempotently; return 503 on storage failure so Meta retries. */
 export async function POST(request: NextRequest) {
   const rawBody = await request.text();
   const signature = request.headers.get("x-hub-signature-256");
@@ -40,11 +34,13 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ received: true });
   }
 
+  let failed = false;
   const messages = normalizeInboundMessages(payload);
   for (const message of messages) {
     try {
       await recordInboundMessage(message);
     } catch (error) {
+      failed = true;
       console.error("WhatsApp webhook: failed to record inbound message", message.waMessageId, error);
     }
   }
@@ -54,9 +50,10 @@ export async function POST(request: NextRequest) {
     try {
       await applyStatusUpdate(status);
     } catch (error) {
+      failed = true;
       console.error("WhatsApp webhook: failed to apply status update", status.waMessageId, error);
     }
   }
 
-  return NextResponse.json({ received: true });
+  return NextResponse.json({ received: !failed }, { status: failed ? 503 : 200 });
 }

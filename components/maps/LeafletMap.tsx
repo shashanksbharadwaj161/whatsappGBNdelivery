@@ -1,159 +1,168 @@
 "use client";
 
 import "leaflet/dist/leaflet.css";
-import { useEffect, useRef } from "react";
+import { createDeliveryPopup, type DeliveryDetails } from "./popup";
+import { useEffect, useRef, useState } from "react";
+import { LocateFixed, Maximize2, Minimize2, Scan } from "lucide-react";
 import type * as LType from "leaflet";
 
 export interface LeafletMarker {
   id: string;
   lat: number;
   lng: number;
-  label?: string; // shown inside the pin (e.g. stop number, "S")
-  color?: string; // pin fill; defaults to brand green
-  title?: string; // popup / tooltip text
-  emphasized?: boolean; // draw a ring around this pin (e.g. the driver's next stop)
+  label?: string;
+  color?: string;
+  title?: string;
+  emphasized?: boolean;
+  details?: DeliveryDetails;
 }
-
 interface LeafletMapProps {
   center: { lat: number; lng: number };
   zoom?: number;
   markers?: LeafletMarker[];
   polyline?: Array<{ lat: number; lng: number }>;
-  draggableMarker?: {
-    lat: number | null;
-    lng: number | null;
-    onChange: (pos: { lat: number; lng: number }) => void;
-  };
+  draggableMarker?: { lat: number | null; lng: number | null; onChange: (pos: { lat: number; lng: number }) => void };
   fitToMarkers?: boolean;
+  roadPath?: boolean;
   heightClassName?: string;
+  selectedMarkerId?: string;
+  onMarkerSelect?: (id: string) => void;
 }
-
-const BRAND_GREEN = "#1f4b36";
-
+const GREEN = "#1f4b36";
 function pinIcon(L: typeof LType, marker: LeafletMarker): LType.DivIcon {
-  const color = marker.color ?? BRAND_GREEN;
-  const ring = marker.emphasized ? "box-shadow:0 0 0 3px rgba(31,75,54,0.35);" : "";
-  const html = `<div style="
-    display:flex;align-items:center;justify-content:center;
-    width:26px;height:26px;border-radius:9999px;
-    background:${color};color:#fff;font-size:12px;font-weight:600;
-    border:2px solid #fff;${ring}
-  ">${marker.label ?? ""}</div>`;
-  return L.divIcon({
-    html,
-    className: "",
-    iconSize: [26, 26],
-    iconAnchor: [13, 13],
-  });
+  // Use textContent: customer-supplied strings must never become map HTML.
+  const pin = document.createElement("div");
+  pin.className = `delivery-map-pin${marker.emphasized ? " delivery-map-pin-selected" : ""}`;
+  pin.style.backgroundColor = marker.color ?? GREEN;
+  pin.textContent = marker.label ?? "•";
+  return L.divIcon({ html: pin, className: "delivery-map-marker", iconSize: [44, 44], iconAnchor: [22, 22] });
 }
 
-/**
- * Key-free interactive map (Leaflet + OpenStreetMap). Renders the map,
- * numbered/coloured pins and route polyline with no API key. Google Maps
- * is used instead when NEXT_PUBLIC_GOOGLE_MAPS_API_KEY is set (see the
- * callers). Tiles require public internet to load; the pins/polyline
- * render regardless.
- */
-export function LeafletMap({
-  center,
-  zoom = 13,
-  markers = [],
-  polyline,
-  draggableMarker,
-  fitToMarkers = false,
-  heightClassName = "h-64",
-}: LeafletMapProps) {
+export function LeafletMap({ center, zoom = 13, markers = [], polyline, draggableMarker,
+  fitToMarkers = false, roadPath = false, heightClassName = "h-80", selectedMarkerId, onMarkerSelect }: LeafletMapProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<LType.Map | null>(null);
-  const draggableRef = useRef<LType.Marker | null>(null);
-  // Keep the latest onChange without re-initialising the map each render.
-  const onChangeRef = useRef(draggableMarker?.onChange);
-  useEffect(() => {
-    onChangeRef.current = draggableMarker?.onChange;
-  });
+  const layerRef = useRef<LType.LayerGroup | null>(null);
+  const dragRef = useRef<LType.Marker | null>(null);
+  const locationRef = useRef<LType.CircleMarker | null>(null);
+  const markerRefs = useRef(new Map<string, LType.Marker>());
+  const callbacks = useRef({ onChange: draggableMarker?.onChange, onMarkerSelect });
+  const initial = useRef({ center, zoom, draggable: Boolean(draggableMarker) });
+  const fitted = useRef(false);
+  const [ready, setReady] = useState(false);
+  const [expanded, setExpanded] = useState(false);
+  const [locating, setLocating] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+  useEffect(() => { callbacks.current = { onChange: draggableMarker?.onChange, onMarkerSelect }; });
 
-  // Init once.
   useEffect(() => {
     let cancelled = false;
-    let map: LType.Map | null = null;
-
-    (async () => {
-      const L = (await import("leaflet")).default;
-      if (cancelled || !containerRef.current || mapRef.current) return;
-
-      map = L.map(containerRef.current, {
-        center: [center.lat, center.lng],
-        zoom,
-        attributionControl: true,
-        scrollWheelZoom: false,
-      });
+    let observer: ResizeObserver | undefined;
+    void import("leaflet").then(({ default: L }) => {
+      if (cancelled || !containerRef.current) return;
+      const map = L.map(containerRef.current, { center: [initial.current.center.lat, initial.current.center.lng], zoom: initial.current.zoom, scrollWheelZoom: false, zoomControl: false, zoomAnimation: false, fadeAnimation: false });
       mapRef.current = map;
-
-      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-        maxZoom: 19,
-        attribution: '&copy; OpenStreetMap contributors',
-      }).addTo(map);
-
-      if (polyline && polyline.length > 1) {
-        L.polyline(
-          polyline.map((p) => [p.lat, p.lng] as [number, number]),
-          { color: BRAND_GREEN, weight: 3, opacity: 0.6 }
-        ).addTo(map);
-      }
-
-      const bounds = L.latLngBounds([]);
-      for (const m of markers) {
-        const mk = L.marker([m.lat, m.lng], { icon: pinIcon(L, m) }).addTo(map);
-        if (m.title) mk.bindPopup(m.title);
-        bounds.extend([m.lat, m.lng]);
-      }
-
-      if (draggableMarker) {
-        const start =
-          draggableMarker.lat != null && draggableMarker.lng != null
-            ? { lat: draggableMarker.lat, lng: draggableMarker.lng }
-            : center;
-        const dm = L.marker([start.lat, start.lng], {
-          draggable: true,
-          icon: pinIcon(L, { id: "drag", lat: start.lat, lng: start.lng }),
-        }).addTo(map);
-        dm.on("dragend", () => {
-          const p = dm.getLatLng();
-          onChangeRef.current?.({ lat: p.lat, lng: p.lng });
-        });
+      L.control.zoom({ position: "bottomright" }).addTo(map);
+      L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+        maxZoom: 19, attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+      }).on("tileerror", () => setNotice("Map tiles could not load. Check your connection; delivery pins are still available.")).addTo(map);
+      layerRef.current = L.layerGroup().addTo(map);
+      if (initial.current.draggable) {
+        const pos = initial.current.center;
+        const marker = L.marker([pos.lat, pos.lng], { draggable: true, icon: pinIcon(L, { id: "pin", ...pos }), title: "Delivery location. Drag to move." }).addTo(map);
+        dragRef.current = marker;
+        marker.on("dragend", () => { const p = marker.getLatLng(); callbacks.current.onChange?.({ lat: p.lat, lng: p.lng }); });
         map.on("click", (e: LType.LeafletMouseEvent) => {
-          dm.setLatLng(e.latlng);
-          onChangeRef.current?.({ lat: e.latlng.lat, lng: e.latlng.lng });
+          marker.setLatLng(e.latlng);
+          callbacks.current.onChange?.({ lat: e.latlng.lat, lng: e.latlng.lng });
         });
-        draggableRef.current = dm;
       }
-
-      if (fitToMarkers && markers.length > 0) {
-        map.fitBounds(bounds, { padding: [32, 32], maxZoom: 15 });
-      }
-
-      // Tiles can size wrong if the container was hidden at init.
-      setTimeout(() => map?.invalidateSize(), 0);
-    })();
-
-    return () => {
-      cancelled = true;
-      mapRef.current?.remove();
-      mapRef.current = null;
-      draggableRef.current = null;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+      observer = new ResizeObserver(() => map.invalidateSize({ pan: false }));
+      observer.observe(containerRef.current);
+      setReady(true);
+    }).catch(() => setNotice("Could not load the map. Reload the page to try again."));
+    return () => { cancelled = true; observer?.disconnect(); mapRef.current?.remove(); mapRef.current = null; dragRef.current = null; layerRef.current = null; };
   }, []);
 
-  // Keep the draggable pin in sync when the parent sets coords elsewhere
-  // (e.g. "Resolve Maps link" fills lat/lng in the order form).
+  // Sync backend refreshes without resetting the map's zoom or position.
+  const markerData = JSON.stringify(markers);
+  const lineData = JSON.stringify(polyline ?? []);
   useEffect(() => {
-    if (!draggableMarker || !draggableRef.current || !mapRef.current) return;
-    if (draggableMarker.lat == null || draggableMarker.lng == null) return;
-    const pos: [number, number] = [draggableMarker.lat, draggableMarker.lng];
-    draggableRef.current.setLatLng(pos);
-    mapRef.current.panTo(pos);
-  }, [draggableMarker?.lat, draggableMarker?.lng, draggableMarker]);
+    if (!ready) return;
+    void import("leaflet").then(({ default: L }) => {
+      const map = mapRef.current, layer = layerRef.current;
+      if (!map || !layer) return;
+      layer.clearLayers();
+      markerRefs.current.clear();
+      const points: LeafletMarker[] = JSON.parse(markerData);
+      for (const point of points) {
+        const marker = L.marker([point.lat, point.lng], { icon: pinIcon(L, point), title: point.title ?? `Stop ${point.label}`, keyboard: true }).addTo(layer);
+        const popup = createDeliveryPopup(point.title ?? `Stop ${point.label}`, point.details);
+        marker.bindPopup(popup).on("click", () => callbacks.current.onMarkerSelect?.(point.id));
+        markerRefs.current.set(point.id, marker);
+      }
+      const path: Array<{ lat: number; lng: number }> = JSON.parse(lineData);
+      if (path.length > 1) L.polyline(path.map(p => [p.lat, p.lng]), { color: GREEN, weight: 3, opacity: 0.65, dashArray: roadPath ? undefined : "7 7" }).addTo(layer);
+      if (fitToMarkers && !fitted.current && points.length) {
+        map.fitBounds(L.latLngBounds(points.map(p => [p.lat, p.lng])), { padding: [36, 36], maxZoom: 15, animate: false });
+        fitted.current = true;
+      }
+    });
+  }, [ready, markerData, lineData, fitToMarkers, roadPath]);
 
-  return <div ref={containerRef} className={`${heightClassName} w-full rounded-lg border border-border bg-surface-alt`} />;
+  useEffect(() => {
+    if (!ready || !selectedMarkerId) return;
+    const marker = markerRefs.current.get(selectedMarkerId);
+    if (marker) { mapRef.current?.setView(marker.getLatLng(), 16, { animate: false }); marker.openPopup(); }
+  }, [selectedMarkerId, ready]);
+  useEffect(() => {
+    if (!ready || draggableMarker?.lat == null || draggableMarker.lng == null) return;
+    const position: [number, number] = [draggableMarker.lat, draggableMarker.lng];
+    dragRef.current?.setLatLng(position);
+    mapRef.current?.panTo(position);
+  }, [ready, draggableMarker?.lat, draggableMarker?.lng]);
+  useEffect(() => {
+    if (!expanded) return;
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const escape = (event: KeyboardEvent) => { if (event.key === "Escape") setExpanded(false); };
+    window.addEventListener("keydown", escape);
+    return () => { document.body.style.overflow = previous; window.removeEventListener("keydown", escape); };
+  }, [expanded]);
+
+  function fit() {
+    const map = mapRef.current;
+    const positions = [...markerRefs.current.values()].map(marker => marker.getLatLng());
+    if (positions.length) map?.fitBounds(positions.map(p => [p.lat, p.lng] as [number, number]), { padding: [36, 36], maxZoom: 15, animate: false });
+    else if (dragRef.current) map?.setView(dragRef.current.getLatLng(), 16);
+  }
+  function locate() {
+    if (!navigator.geolocation) { setNotice("Your browser does not support location. You can still move the map manually."); return; }
+    setLocating(true); setNotice(null);
+    navigator.geolocation.getCurrentPosition(async ({ coords }) => {
+      const { default: L } = await import("leaflet");
+      const map = mapRef.current;
+      if (!map) return;
+      const pos: [number, number] = [coords.latitude, coords.longitude];
+      locationRef.current?.remove();
+      locationRef.current = L.circleMarker(pos, { radius: 8, color: "white", weight: 3, fillColor: "#2563eb", fillOpacity: 1 }).addTo(map).bindPopup("Your location");
+      map.setView(pos, 16, { animate: false });
+      setLocating(false);
+      setNotice(initial.current.draggable ? "Your location is shown in blue. Tap the map to set the delivery pin." : null);
+    }, error => { setLocating(false); setNotice(error.code === 1 ? "Location access is off. Allow it in your browser settings, or move the map manually." : "Could not find your location. Try again outdoors or move the map manually."); }, { enableHighAccuracy: true, timeout: 10000, maximumAge: 30000 });
+  }
+  return (
+    <section aria-label="Interactive delivery map" className={expanded ? "fixed inset-0 z-[100] bg-surface p-3 flex flex-col" : "relative isolate"}>
+      <div className="mb-2 flex flex-wrap items-center gap-2">
+        <button type="button" className="map-tool" onClick={fit} disabled={!ready}><Scan size={17} /> Fit stops</button>
+        <button type="button" className="map-tool" onClick={locate} disabled={!ready || locating}><LocateFixed size={17} /> {locating ? "Locating…" : "My location"}</button>
+        <button type="button" className="map-tool ml-auto" onClick={() => setExpanded(!expanded)} aria-label={expanded ? "Close expanded map" : "Expand map"} aria-pressed={expanded}>{expanded ? <Minimize2 size={18} /> : <Maximize2 size={18} />}</button>
+      </div>
+      {notice && <p role="status" className="mb-2 rounded-lg bg-accent-soft p-3 text-sm text-ink">{notice}</p>}
+      <div className={expanded ? "flex-1 min-h-0" : heightClassName}>
+        <div ref={containerRef} className="relative z-0 h-full w-full rounded-xl border border-border bg-surface-alt" aria-label="Pan or zoom the map and select a delivery pin" />
+      </div>
+      {!ready && !notice && <p role="status" className="absolute inset-x-0 top-1/2 text-center text-sm text-ink-muted">Loading map…</p>}
+    </section>
+  );
 }

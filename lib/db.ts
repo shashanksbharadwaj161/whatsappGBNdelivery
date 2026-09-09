@@ -1,3 +1,4 @@
+import { getDatabaseUrl } from "@/lib/database-url";
 import { PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 
@@ -8,11 +9,11 @@ import { PrismaPg } from "@prisma/adapter-pg";
  * datasource url at runtime.
  */
 function createPrismaClient() {
-  const connectionString = process.env.DATABASE_URL;
+  const connectionString = getDatabaseUrl();
   if (!connectionString) {
-    throw new Error("DATABASE_URL is not set");
+    throw new Error("Database connection is not configured");
   }
-  const adapter = new PrismaPg({ connectionString });
+  const adapter = new PrismaPg({ connectionString, max: 5, connectionTimeoutMillis: 10000 });
   return new PrismaClient({ adapter });
 }
 
@@ -20,8 +21,12 @@ const globalForPrisma = globalThis as unknown as {
   prisma: ReturnType<typeof createPrismaClient> | undefined;
 };
 
-export const db = globalForPrisma.prisma ?? createPrismaClient();
-
-if (process.env.NODE_ENV !== "production") {
-  globalForPrisma.prisma = db;
-}
+// Delay connection setup until a request actually uses the database. Build-time
+// route discovery must not require runtime secrets or a reachable database.
+export const db = new Proxy({} as PrismaClient, {
+  get(_target, property) {
+    const client = globalForPrisma.prisma ??= createPrismaClient();
+    const value = Reflect.get(client, property, client);
+    return typeof value === "function" ? value.bind(client) : value;
+  },
+});

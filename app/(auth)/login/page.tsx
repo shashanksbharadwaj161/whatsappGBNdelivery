@@ -21,6 +21,7 @@ function LoginForm() {
     setError(null);
     setLoading(true);
 
+    try {
     const supabase = createSupabaseBrowserClient();
     const { data, error: signInError } = await supabase.auth.signInWithPassword({
       email,
@@ -35,9 +36,17 @@ function LoginForm() {
 
     const role = data.user.app_metadata?.role as string | undefined;
     const next = searchParams.get("next");
-    const destination = next ?? (role === "DRIVER" ? "/driver" : "/dashboard");
+    if (role !== "OWNER" && role !== "DRIVER") {
+      setError("Your account needs an owner or driver role. Ask the administrator to finish setting up your access.");
+      return;
+    }
+    const safeNext = next && /^\/(dashboard|inbox|orders|routes|customers|analytics|settings|driver)(\/|\?|$)/.test(next) && !next.includes("\\") ? next : null;
+    const destination = safeNext ?? (role === "DRIVER" ? "/driver" : "/dashboard");
     router.push(destination);
     router.refresh();
+    } catch {
+      setError("Sign-in is unavailable. Check your connection or ask the administrator to verify the authentication setup.");
+    } finally { setLoading(false); }
   }
 
   return (
@@ -76,7 +85,7 @@ function LoginForm() {
               onChange={(e) => setPassword(e.target.value)}
             />
           </div>
-          {error && <p className="text-sm text-status-cancelled">{error}</p>}
+          {error && <p role="alert" className="text-sm text-status-cancelled">{error}</p>}
           <Button type="submit" className="w-full" disabled={loading}>
             {loading ? "Signing in…" : "Sign in"}
           </Button>
