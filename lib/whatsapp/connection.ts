@@ -1,4 +1,11 @@
 export async function whatsappConnectionStatus(): Promise<string> {
+  if (process.env.WHATSAPP_PROVIDER === 'kapso') {
+    if (!process.env.KAPSO_API_KEY || !process.env.WHATSAPP_PHONE_NUMBER_ID) return 'Kapso number setup required';
+    if (!process.env.KAPSO_WEBHOOK_SECRET) return 'Kapso webhook setup required';
+    return process.env.WHATSAPP_AUTOMATION_ENABLED === 'true'
+      ? 'Kapso configured · verify number status in Kapso'
+      : 'Kapso configured · ordering paused';
+  }
   const token=process.env.WHATSAPP_ACCESS_TOKEN;
   const phone=process.env.WHATSAPP_PHONE_NUMBER_ID;
   if(!token || !phone) return 'Setup required';

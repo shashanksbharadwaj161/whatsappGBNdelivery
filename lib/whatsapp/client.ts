@@ -7,13 +7,14 @@ export type SendResult =
 function graphUrl() {
   const phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID;
   if (!phoneNumberId) throw new Error("WHATSAPP_PHONE_NUMBER_ID is not set");
-  return `https://graph.facebook.com/${GRAPH_API_VERSION}/${phoneNumberId}/messages`;
+  return `${process.env.WHATSAPP_PROVIDER === "kapso" ? "https://api.kapso.ai/meta/whatsapp" : "https://graph.facebook.com"}/${GRAPH_API_VERSION}/${phoneNumberId}/messages`;
 }
 
 async function callGraphApi(body: Record<string, unknown>): Promise<SendResult> {
-  const token = process.env.WHATSAPP_ACCESS_TOKEN;
+  const kapso=process.env.WHATSAPP_PROVIDER === "kapso";
+  const token = kapso ? process.env.KAPSO_API_KEY : process.env.WHATSAPP_ACCESS_TOKEN;
   if (!token) {
-    return { ok: false, error: "WHATSAPP_ACCESS_TOKEN is not configured" };
+    return { ok: false, error: kapso ? "KAPSO_API_KEY is not configured" : "WHATSAPP_ACCESS_TOKEN is not configured" };
   }
 
   try {
@@ -21,7 +22,7 @@ async function callGraphApi(body: Record<string, unknown>): Promise<SendResult> 
       method: "POST",
       signal: AbortSignal.timeout(15000),
       headers: {
-        Authorization: `Bearer ${token}`,
+        ...(kapso ? {"X-API-Key":token} : {Authorization: `Bearer ${token}`}),
         "Content-Type": "application/json",
       },
       body: JSON.stringify({ messaging_product: "whatsapp", ...body }),

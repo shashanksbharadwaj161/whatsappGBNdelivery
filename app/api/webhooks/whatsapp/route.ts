@@ -19,6 +19,7 @@ export async function GET(request: NextRequest) {
 
 /** Persist each item idempotently; return 503 on storage failure so Meta retries. */
 export async function POST(request: NextRequest) {
+  if(process.env.WHATSAPP_PROVIDER === "kapso") return NextResponse.json({received:true});
   const rawBody = await request.text();
   const signature = request.headers.get("x-hub-signature-256");
 

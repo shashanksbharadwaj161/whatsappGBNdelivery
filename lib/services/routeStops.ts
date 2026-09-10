@@ -61,6 +61,7 @@ export async function updateStopStatus(input: UpdateStopStatusInput) {
 
     const stop = await tx.routeStop.findUnique({ where: { id: input.stopId }, include: { route: true } });
     if (!stop) throw new NotFoundError("Route stop not found");
+    assertRouteAccessible(stop.route, input.actor);
     if (stop.route.status === "PLANNED") {
       throw new ConflictError("Start the route before marking stops");
     }

@@ -15,7 +15,7 @@ const OWNER_OR_DRIVER_SEGMENTS = ["driver"];
 export async function updateSession(request: NextRequest) {
   let response = NextResponse.next({ request });
   // Public machine endpoints must not depend on an Auth network round trip.
-  if (["/api/health", "/api/webhooks/whatsapp", "/privacy", "/data-deletion"].includes(request.nextUrl.pathname)) return response;
+  if (["/api/health", "/api/webhooks/whatsapp", "/api/webhooks/kapso", "/privacy", "/data-deletion"].includes(request.nextUrl.pathname)) return response;
 
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;

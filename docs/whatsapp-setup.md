@@ -1,8 +1,39 @@
 # WhatsApp Cloud API setup
 
-The app uses Meta's **official WhatsApp Business Platform / Cloud API**
-directly (no third-party WhatsApp libraries or scraping). This connects
-the business number **+91 63621 34868** to the Inbox.
+The app supports Meta's official WhatsApp Business Platform directly or
+through Kapso. Production intends to use Kapso Coexistence to keep
+**+91 63621 34868** working in the WhatsApp Business phone app.
+
+## Kapso Coexistence
+
+Complete **Connect WhatsApp Business App** in Kapso and approve the
+connection on the business phone. Do not delete or deregister the phone
+app account. Confirm the connected number is online before enabling intake.
+
+Set these server-only Render variables using secure dashboard fields:
+
+- `WHATSAPP_PROVIDER=kapso`
+- `WHATSAPP_PHONE_NUMBER_ID`: the actual connected phone ID from Kapso
+- `KAPSO_API_KEY`: the project API key
+- `KAPSO_WEBHOOK_SECRET`: a randomly generated webhook signing secret
+- `WHATSAPP_AUTOMATION_ENABLED=true`
+
+Create a v2 **unbuffered** webhook in Kapso with the same signing secret,
+pointing to `https://gbn-delivery.onrender.com/api/webhooks/kapso`.
+Subscribe to `whatsapp.message.received`, `whatsapp.message.sent`,
+`whatsapp.message.delivered`, `whatsapp.message.read`, and
+`whatsapp.message.failed`. Buffered batch payloads are not supported.
+
+The handler validates `X-Webhook-Signature` against the raw request body,
+filters by the configured phone ID, and ignores historical imports and
+outbound phone-app echoes. Direct Meta POST intake is disabled when Kapso
+is selected, avoiding duplicate processing through two providers.
+
+Verify a real inbound `ORDER`, automated reply, location pin, confirmed
+order, automatic delivery round, and driver GPS optimization before
+declaring the integration live. Configuration alone does not verify delivery.
+
+The following sections describe the alternative direct Meta connection.
 
 ## 1. Create a Meta Developer account and app
 
@@ -18,9 +49,8 @@ the business number **+91 63621 34868** to the Inbox.
    default — for production, add and verify the real number
    (+91 63621 34868) instead: **WhatsApp → API Setup → Add phone
    number**, following Meta's verification flow (SMS/voice OTP).
-   - If this number is currently used in the regular WhatsApp Business
-     app, it needs to be migrated to the Cloud API — Meta's flow walks
-     you through this; the number stays reachable throughout.
+   - To preserve an existing WhatsApp Business phone app account, use
+     Coexistence onboarding above instead of deregistering it.
 2. Note down, from the API Setup page:
    - **Phone number ID** → `WHATSAPP_PHONE_NUMBER_ID`
    - **WhatsApp Business Account ID** → `WHATSAPP_BUSINESS_ACCOUNT_ID`
@@ -31,7 +61,7 @@ The token shown by default on the API Setup page expires in 24 hours —
 fine for a first test, not for production.
 
 1. **Business Settings → Users → System Users → Add** — create a system
-   user (e.g. "gbn-app") with **Admin** role.
+   user (e.g. "gbn-app") with only the required app and messaging access.
 2. Assign it the WhatsApp app with `whatsapp_business_messaging` and
    `whatsapp_business_management` permissions.
 3. **Generate token** for that system user, selecting those two
