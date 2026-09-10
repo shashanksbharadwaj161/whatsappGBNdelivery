@@ -1,4 +1,5 @@
 import { resolveGoogleMapsUrl } from '@/lib/maps/resolveShareUrl';
+import { geocodeAddress } from '@/lib/maps/geocode';
 import { addToAutomaticRound } from '@/lib/services/automatic-routes';
 import { Prisma } from '@prisma/client';
 import { db } from '@/lib/db';
@@ -13,6 +14,14 @@ export async function automateInbound(messageId: string) {
   const incoming = await db.whatsappMessage.findUniqueOrThrow({where:{id:messageId},include:{conversation:true}});
   let linkedLocation: {lat:number;lng:number}|null = null;
   const incomingState = intakeSchema.safeParse(incoming.conversation.intakeState);
+  let addressPin: {lat:number;lng:number;label:string}|null = null;
+  const addressText = incoming.textBody?.trim() ?? '';
+  if (!incoming.automationProcessedAt && incomingState.success && incomingState.data.step === 'address' && addressText.length >= 15 && addressText.length <= 1000) {
+    const resolved = await geocodeAddress(addressText);
+    if (resolved.ok && Number.isFinite(resolved.data.latitude) && Number.isFinite(resolved.data.longitude) && Math.abs(resolved.data.latitude) <= 90 && Math.abs(resolved.data.longitude) <= 180) {
+      addressPin = {lat: resolved.data.latitude, lng: resolved.data.longitude, label: resolved.data.formattedAddress};
+    }
+  }
   if(!incoming.automationProcessedAt && incomingState.success && incomingState.data.step==='location' && /^https:\/\//i.test(incoming.textBody?.trim()??'')) {
     const resolved=await resolveGoogleMapsUrl(incoming.textBody!.trim());
     if(resolved.ok) linkedLocation={lat:resolved.data.latitude,lng:resolved.data.longitude};
@@ -29,6 +38,13 @@ export async function automateInbound(messageId: string) {
     const previous=intakeSchema.safeParse(message.conversation.intakeState);
     const result=advanceIntake(previous.success?previous.data:null,message.textBody??'',message.locationLatitude!=null&&message.locationLongitude!=null?{lat:message.locationLatitude,lng:message.locationLongitude}:linkedLocation,todayBusinessDateString());
     let replyText=result.reply;
+    // A geocoder result is a suggestion, not proof of the customer's entrance.
+    // The customer confirms or replaces it; the driver never types addresses.
+    if (previous.success && previous.data.step === 'address' && result.state.step === 'location' && addressPin) {
+      result.state.lat = addressPin.lat;
+      result.state.lng = addressPin.lng;
+      replyText = `I found this possible delivery location: ${addressPin.label}\nhttps://www.google.com/maps?q=${addressPin.lat},${addressPin.lng}\nOpen the map and check your building. Reply USE PIN if correct, or attach your exact WhatsApp location / Google Maps pin link. The driver will use this pin.`;
+    }
     if(result.confirm) {
       const state=result.state;
       if(!state.name||!state.milkSize||!state.quantity||!state.date||!state.address||state.lat==null||state.lng==null) throw new Error('Incomplete order intake');

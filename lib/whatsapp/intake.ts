@@ -32,12 +32,13 @@ export function advanceIntake(state: Intake | null, text: string, location: {lat
       if(value.length<15 || value.length>1000) return {state,reply:'Please send your full address, including house/flat, street and pincode.'};
       next.address=value; next.step='location'; return {state:next,reply:'Please attach the delivery location using WhatsApp → Attach (+) → Location. You can also send a Google Maps pin link. Place the pin at your building; a pincode alone is not precise enough for the driver.'};
     case 'location':
+      if (/^use pin$/i.test(value) && state.lat != null && state.lng != null) location = {lat: state.lat, lng: state.lng};
       if(!location || !Number.isFinite(location.lat) || !Number.isFinite(location.lng) || Math.abs(location.lat)>90 || Math.abs(location.lng)>180) return {state,reply:'Please attach a WhatsApp location pin or a Google Maps pin link for the delivery address, or send AGENT for help.'};
       next.lat=location.lat; next.lng=location.lng; next.step='email'; return {state:next,reply:'What is your email address? Send SKIP if you prefer not to provide one.'};
     case 'email':
       if(!/^skip$/i.test(value) && !z.email().safeParse(value).success) return {state,reply:'Please send a valid email address or SKIP.'};
       next.email=/^skip$/i.test(value)?null:value; next.step='confirm';
-      return {state:next,reply:`Review your order:\n${next.name}\nA2 milk: ${next.quantity} × ${next.milkSize==='L1'?'1L':'500ml'}\nDate: ${next.date}, morning\n${next.address}\nTotal: ₹${computeOrderPricing({milkSize:next.milkSize!,quantity:next.quantity!}).total} including delivery.\nReply CONFIRM to place this order, RESTART to change it, or AGENT for help.`};
+      return {state:next,reply:`Review your order:\n${next.name}\nA2 milk: ${next.quantity} × ${next.milkSize==='L1'?'1L':'500ml'}\nDate: ${next.date}, morning\n${next.address}\nDelivery pin: https://www.google.com/maps?q=${next.lat},${next.lng}\nTotal: ₹${computeOrderPricing({milkSize:next.milkSize!,quantity:next.quantity!}).total} including delivery.\nReply CONFIRM to place this order, RESTART to change it, or AGENT for help.`};
     case 'confirm': return /^confirm$/i.test(value)?{state:next,reply:'',confirm:true}:{state,reply:'Reply CONFIRM to place the reviewed order, RESTART to change it, or AGENT for help.'};
   }
 }

@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createHmac } from 'node:crypto';
 import { normalizeKapsoInbound, verifyKapsoSignature } from '../lib/whatsapp/kapso';
+import { advanceIntake } from '../lib/whatsapp/intake';
 
 const payload = {
   phone_number_id: 'test-phone',
@@ -35,4 +36,14 @@ test('Kapso ignores foreign numbers, historical imports and outgoing echoes', ()
     assert.equal(normalizeKapsoInbound({ ...payload, message: { ...payload.message, kapso } }, 'test-phone'), null);
   }
   assert.equal(normalizeKapsoInbound({ ...payload, message: { ...payload.message, type: 'location', location: { latitude: 200, longitude: 77 } } }, 'test-phone'), null);
+});
+
+test('an address-derived pin requires customer acceptance and can be replaced', () => {
+  const state = {step: 'location' as const, lat: 12.97, lng: 77.59};
+  assert.equal(advanceIntake(state, 'hello', null, '2026-09-10').state.step, 'location');
+  assert.equal(advanceIntake(state, 'USE PIN', null, '2026-09-10').state.step, 'email');
+  assert.equal(advanceIntake({step:'location'}, 'USE PIN', null, '2026-09-10').state.step, 'location');
+  const corrected = advanceIntake(state, '', {lat:13, lng:77.6}, '2026-09-10');
+  assert.equal(corrected.state.lat, 13);
+  assert.equal(corrected.state.step, 'email');
 });

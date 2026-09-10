@@ -12,6 +12,20 @@ function nominatimBaseUrl(): string {
   return (process.env.NOMINATIM_BASE_URL || "https://nominatim.openstreetmap.org").replace(/\/$/, "");
 }
 const NOMINATIM_HEADERS = { "User-Agent": "GauBhoomiNaturals-Delivery/1.0" };
+let nextNominatimRequest = 0;
+
+// The public service allows at most one request per second. This deployment
+// uses one server instance; multiple replicas need a shared limiter or their
+// own geocoding provider. Under a burst, ask for a pin instead of queueing
+// webhook work indefinitely.
+async function fetchNominatim(url: string) {
+  const now = Date.now();
+  const delay = Math.max(0, nextNominatimRequest - now);
+  if (delay > 5000) throw new Error('Geocoding is busy; please share a location pin');
+  nextNominatimRequest = now + delay + 1100;
+  if (delay) await new Promise(resolve => setTimeout(resolve, delay));
+  return fetchWithTimeout(url, NOMINATIM_HEADERS);
+}
 
 interface GeocodeApiResult {
   formatted_address: string;
@@ -66,7 +80,7 @@ function nominatimArea(address?: Record<string, string>): string | undefined {
 async function geocodeViaNominatim(address: string): Promise<MapsResult<ResolvedLocation>> {
   const url = `${nominatimBaseUrl()}/search?q=${encodeURIComponent(address)}&format=jsonv2&limit=1&countrycodes=in&addressdetails=1`;
   try {
-    const res = await fetchWithTimeout(url, NOMINATIM_HEADERS);
+    const res = await fetchNominatim(url);
     if (!res.ok) {
       return { ok: false, code: "UPSTREAM_ERROR", message: `Geocoding service returned ${res.status}` };
     }
@@ -95,7 +109,7 @@ async function geocodeViaNominatim(address: string): Promise<MapsResult<Resolved
 async function reverseViaNominatim(latitude: number, longitude: number): Promise<MapsResult<ResolvedLocation>> {
   const url = `${nominatimBaseUrl()}/reverse?lat=${latitude}&lon=${longitude}&format=jsonv2&addressdetails=1`;
   try {
-    const res = await fetchWithTimeout(url, NOMINATIM_HEADERS);
+    const res = await fetchNominatim(url);
     if (!res.ok) {
       return { ok: false, code: "UPSTREAM_ERROR", message: `Reverse geocoding returned ${res.status}` };
     }
