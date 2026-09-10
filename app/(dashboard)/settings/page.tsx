@@ -1,3 +1,4 @@
+import { whatsappConnectionStatus } from "@/lib/whatsapp/connection";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
@@ -12,12 +13,10 @@ function isConfigured(value: string | undefined, placeholders: string[] = ["plac
 }
 
 export default async function SettingsPage() {
-  const startLocation = await getDefaultStartLocation();
+  const [startLocation, whatsappStatus] = await Promise.all([getDefaultStartLocation(), whatsappConnectionStatus()]);
 
   const integrations = [
-    { name: "Google Maps (browser)", configured: isConfigured(process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY) },
-    { name: "Google Maps (server / routing)", configured: isConfigured(process.env.GOOGLE_MAPS_SERVER_API_KEY) },
-    { name: "WhatsApp Cloud API", configured: isConfigured(process.env.WHATSAPP_ACCESS_TOKEN) },
+    { name: "Google Maps upgrade (optional)", configured: isConfigured(process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY) },
     { name: "Supabase Auth", configured: isConfigured(process.env.NEXT_PUBLIC_SUPABASE_URL, ["placeholder.supabase.co", "[PROJECT-REF]"]) },
   ];
 
@@ -58,7 +57,7 @@ export default async function SettingsPage() {
                 <span className="font-medium text-ink">₹{DELIVERY_FEE}</span>
               </div>
               <p className="pt-2 text-xs text-ink-faint">
-                Set in lib/pricing.ts — change and redeploy to update prices.
+                These are the prices used for order confirmations.
               </p>
             </CardContent>
           </Card>
@@ -69,8 +68,7 @@ export default async function SettingsPage() {
             </CardHeader>
             <CardContent>
               <p className="mb-3 text-xs text-ink-muted">
-                Runs automatically on Vercel Cron (see docs/deployment.md), or trigger today&rsquo;s
-                generation manually here.
+                Create today&rsquo;s deliveries from active subscriptions. Repeating this action does not duplicate existing orders.
               </p>
               <RunGenerationButton />
             </CardContent>
@@ -81,8 +79,10 @@ export default async function SettingsPage() {
               <CardTitle>Integrations</CardTitle>
             </CardHeader>
             <CardContent className="space-y-2">
+              <p className="text-sm">Maps and road routing: OpenStreetMap / OSRM</p>
+              <p className="text-sm">WhatsApp: {whatsappStatus}</p>
               {integrations.map((i) => (
-                <div key={i.name} className="flex items-center justify-between text-sm">
+                <div key={i.name} className="flex flex-wrap items-center justify-between gap-2 text-sm">
                   <span className="text-ink">{i.name}</span>
                   <Badge tone={i.configured ? "delivered" : "pending"}>
                     {i.configured ? "Configured" : "Not configured"}
@@ -90,7 +90,7 @@ export default async function SettingsPage() {
                 </div>
               ))}
               <p className="pt-2 text-xs text-ink-faint">
-                See docs/google-maps-setup.md and docs/whatsapp-setup.md for how to configure these.
+                A connected phone still requires a published Meta app and an active message-webhook subscription to receive customer orders.
               </p>
             </CardContent>
           </Card>
