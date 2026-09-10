@@ -34,14 +34,6 @@ export async function startRoute(routeId: string, actor: RouteActor) {
   return db.route.findUniqueOrThrow({ where: { id: routeId } });
 }
 
-async function maybeCompleteRoute(routeId: string) {
-  const stops = await db.routeStop.findMany({ where: { routeId } });
-  const allSettled = stops.every((s) => s.status !== "PENDING" && s.status !== "EN_ROUTE");
-  if (allSettled) {
-    await db.route.update({ where: { id: routeId }, data: { status: "COMPLETED", completedAt: new Date() } });
-  }
-}
-
 export interface UpdateStopStatusInput {
   stopId: string;
   status: Extract<RouteStopStatus, "DELIVERED" | "SKIPPED" | "UNAVAILABLE">;
@@ -50,19 +42,35 @@ export interface UpdateStopStatusInput {
 }
 
 export async function updateStopStatus(input: UpdateStopStatusInput) {
-  const stop = await db.routeStop.findUnique({ where: { id: input.stopId }, include: { route: true } });
-  if (!stop) throw new NotFoundError("Route stop not found");
-  assertRouteAccessible(stop.route, input.actor);
-  if (stop.status === "DELIVERED" || stop.status === "SKIPPED" || stop.status === "UNAVAILABLE") {
-    throw new ConflictError("This stop has already been settled");
-  }
-  if (stop.route.status !== "IN_PROGRESS") {
-    throw new ConflictError("Start the route before marking stops");
-  }
+  const existing = await db.routeStop.findUnique({ where: { id: input.stopId }, include: { route: true } });
+  if (!existing) throw new NotFoundError("Route stop not found");
+  assertRouteAccessible(existing.route, input.actor);
 
   const now = new Date();
 
+  // Everything authoritative happens under the same per-date advisory lock
+  // reoptimizeRoute takes, so a stop update and a concurrent re-plan cannot
+  // interleave. Re-read the route and stop inside the lock (a re-plan may
+  // have cancelled this route or superseded this stop since we read above),
+  // settle the stop, complete the route in the same transaction when it is
+  // the last one, and always bump the route's updatedAt so an in-flight
+  // reoptimize fails its optimistic version check instead of silently
+  // dropping this delivery.
   await db.$transaction(async (tx) => {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`routes:${existing.route.date.toISOString()}`}))`;
+
+    const stop = await tx.routeStop.findUnique({ where: { id: input.stopId }, include: { route: true } });
+    if (!stop) throw new NotFoundError("Route stop not found");
+    if (stop.route.status === "PLANNED") {
+      throw new ConflictError("Start the route before marking stops");
+    }
+    if (stop.route.status !== "IN_PROGRESS") {
+      throw new ConflictError("This round is no longer active — it was re-planned or completed. Refresh and try again.");
+    }
+    if (stop.status === "DELIVERED" || stop.status === "SKIPPED" || stop.status === "UNAVAILABLE") {
+      throw new ConflictError("This stop has already been settled");
+    }
+
     await tx.routeStop.update({
       where: { id: input.stopId },
       data: {
@@ -76,6 +84,15 @@ export async function updateStopStatus(input: UpdateStopStatusInput) {
     if (input.status === "DELIVERED") {
       await tx.order.update({ where: { id: stop.orderId }, data: { status: "DELIVERED" } });
     }
+
+    const stops = await tx.routeStop.findMany({ where: { routeId: stop.routeId } });
+    const allSettled = stops.every((s) => s.status !== "PENDING" && s.status !== "EN_ROUTE");
+    await tx.route.update({
+      where: { id: stop.routeId },
+      data: allSettled
+        ? { status: "COMPLETED", completedAt: now, updatedAt: now }
+        : { updatedAt: now },
+    });
   });
 
   await recordAudit({
@@ -89,10 +106,8 @@ export async function updateStopStatus(input: UpdateStopStatusInput) {
     entityId: input.stopId,
     actorUserId: input.actor.userId,
     actorType: "driver",
-    metadata: { orderId: stop.orderId, reason: input.failureReason },
+    metadata: { orderId: existing.orderId, reason: input.failureReason },
   });
-
-  await maybeCompleteRoute(stop.routeId);
 
   return db.routeStop.findUniqueOrThrow({ where: { id: input.stopId } });
 }

@@ -26,7 +26,7 @@ export function assertRouteAccessible(route: { driverId: string | null }, actor:
 }
 
 /** The driverId a round should carry once this actor acts on it: a driver claims an unassigned round; an owner never becomes the driver. */
-function claimedDriverId(existingDriverId: string | null, actor: RouteActor): string | null {
+export function claimedDriverId(existingDriverId: string | null, actor: RouteActor): string | null {
   if (existingDriverId) return existingDriverId;
   return actor.role === "DRIVER" ? actor.userId : null;
 }
