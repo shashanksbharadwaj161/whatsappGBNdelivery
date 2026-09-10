@@ -24,3 +24,17 @@ test('full round creates a separate round awaiting actual driver GPS',async()=>{
 test('replayed order never adds another active stop',async()=>{
  const {tx,writes}=fixture(2,true);await addToAutomaticRound(tx,'o1');assert.equal(writes.length,0);
 });
+test('late order joins an unstarted round and forces a GPS recalculation',async()=>{
+ let roundQuery:Record<string,unknown>|undefined; const updates:Array<Record<string,unknown>>=[];
+ const tx={
+  $executeRaw:async()=>1,
+  order:{findUniqueOrThrow:async()=>({id:'o1',status:'CONFIRMED',deliveryDate:new Date('2026-09-11'),customer:{name:'Test'},address:{latitude:13,longitude:77,formattedAddress:'Test address'},quantity:1,milkSize:'ML500'})},
+  routeStop:{findFirst:async()=>null,create:async()=>({})},
+  route:{findMany:async({where}:{where:Record<string,unknown>})=>{roundQuery=where;return [{id:'planned',_count:{stops:4}}];},create:async()=>({id:'x'}),update:async({data}:{data:Record<string,unknown>})=>{updates.push(data);return {};}}
+ } as unknown as Prisma.TransactionClient;
+ await addToAutomaticRound(tx,'o1');
+ // Only rounds that have not yet departed are eligible to absorb a new order.
+ assert.equal(roundQuery?.startedAt,null);
+ // Joining flips the round back to awaiting GPS so the order is recomputed.
+ assert.equal(updates.length,1);assert.equal(updates[0].awaitingDriverLocation,true);
+});

@@ -1,5 +1,5 @@
 import { formatInTimeZone, fromZonedTime, toZonedTime } from "date-fns-tz";
-import { addDays, format as formatDateFns } from "date-fns";
+import { addDays } from "date-fns";
 
 /**
  * All calendar-day logic (delivery dates, "Today"/"Tomorrow", subscription
@@ -35,7 +35,10 @@ export function businessDateOnlyToDate(dateString: string): Date {
 }
 
 export function dateToBusinessDateString(date: Date): string {
-  return formatDateFns(date, "yyyy-MM-dd");
+  // Must evaluate in the business timezone like every other calendar-day
+  // helper here — date-fns `format` would use the host's local zone and
+  // drift a day on non-UTC servers.
+  return businessDateStringFrom(date);
 }
 
 /** UTC instant range covering one full Asia/Kolkata calendar day. */

@@ -1,11 +1,13 @@
 import { db } from "@/lib/db";
 import { recordAudit } from "@/lib/audit";
 import { NotFoundError, ConflictError } from "@/lib/errors";
+import { assertRouteAccessible, type RouteActor } from "@/lib/services/routes";
 import type { RouteStopStatus } from "@prisma/client";
 
-export async function startRoute(routeId: string, actorUserId?: string) {
+export async function startRoute(routeId: string, actor: RouteActor) {
   const route = await db.route.findUnique({ where: { id: routeId }, include: { stops: true } });
   if (!route) throw new NotFoundError("Route not found");
+  assertRouteAccessible(route, actor);
   if (route.status !== "PLANNED") throw new ConflictError(`Route is already ${route.status.toLowerCase()}`);
 
   if (route.awaitingDriverLocation) throw new ConflictError("Plan this round from your current location before starting deliveries.");
@@ -14,7 +16,10 @@ export async function startRoute(routeId: string, actorUserId?: string) {
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`routes:${route.date.toISOString()}`}))`;
     const fresh = await tx.route.findUniqueOrThrow({where:{id:routeId}});
     if(fresh.status!=="PLANNED" || fresh.updatedAt.getTime()!==route.updatedAt.getTime()) throw new ConflictError("The route changed. Refresh before starting.");
-    await tx.route.update({ where: { id: routeId }, data: { status: "IN_PROGRESS", startedAt: new Date() } });
+    // A driver starting an unassigned round claims it, so later stop
+    // updates and re-plans are locked to them.
+    const driverId = actor.role === "DRIVER" ? (fresh.driverId ?? actor.userId) : fresh.driverId;
+    await tx.route.update({ where: { id: routeId }, data: { status: "IN_PROGRESS", startedAt: new Date(), driverId } });
     await tx.order.updateMany({where:{id:{in:route.stops.map(s=>s.orderId)}},data:{status:"OUT_FOR_DELIVERY"}});
   });
 
@@ -22,7 +27,7 @@ export async function startRoute(routeId: string, actorUserId?: string) {
     action: "ROUTE_STARTED",
     entityType: "Route",
     entityId: routeId,
-    actorUserId,
+    actorUserId: actor.userId,
     actorType: "driver",
   });
 
@@ -41,12 +46,13 @@ export interface UpdateStopStatusInput {
   stopId: string;
   status: Extract<RouteStopStatus, "DELIVERED" | "SKIPPED" | "UNAVAILABLE">;
   failureReason?: string;
-  actorUserId?: string;
+  actor: RouteActor;
 }
 
 export async function updateStopStatus(input: UpdateStopStatusInput) {
   const stop = await db.routeStop.findUnique({ where: { id: input.stopId }, include: { route: true } });
   if (!stop) throw new NotFoundError("Route stop not found");
+  assertRouteAccessible(stop.route, input.actor);
   if (stop.status === "DELIVERED" || stop.status === "SKIPPED" || stop.status === "UNAVAILABLE") {
     throw new ConflictError("This stop has already been settled");
   }
@@ -81,7 +87,7 @@ export async function updateStopStatus(input: UpdateStopStatusInput) {
           : "DELIVERY_UNAVAILABLE",
     entityType: "RouteStop",
     entityId: input.stopId,
-    actorUserId: input.actorUserId,
+    actorUserId: input.actor.userId,
     actorType: "driver",
     metadata: { orderId: stop.orderId, reason: input.failureReason },
   });

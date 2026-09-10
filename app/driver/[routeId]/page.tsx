@@ -1,5 +1,7 @@
+import { notFound } from "next/navigation";
 import { DriverRouteView, type DriverStopView } from "@/components/driver/DriverRouteView";
 import { getRouteDetail } from "@/lib/services/routes";
+import { getOptionalUser } from "@/lib/auth/guard";
 import { formatBusinessTime } from "@/lib/tz";
 import { getOrNotFound } from "@/lib/notFoundGuard";
 
@@ -10,6 +12,11 @@ export default async function DriverRoutePage({
 }) {
   const { routeId } = await params;
   const route = await getOrNotFound(() => getRouteDetail(routeId));
+
+  // A driver may only open an unassigned (claimable) or own round; the owner
+  // sees every round. Treat another driver's round as not found here.
+  const user = await getOptionalUser();
+  if (user?.role === "DRIVER" && route.driverId && route.driverId !== user.userId) notFound();
 
   const stops: DriverStopView[] = route.stops.map((stop) => ({
     id: stop.id,

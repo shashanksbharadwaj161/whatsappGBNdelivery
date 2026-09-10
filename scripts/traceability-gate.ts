@@ -23,6 +23,11 @@ async function main() {
   const routeStopsService = await import("@/lib/services/routeStops");
   const { getDefaultStartLocation } = await import("@/lib/services/settings");
 
+  // A system actor with an OWNER profile so route start / stop updates pass
+  // the same driver-ownership checks the real endpoints enforce.
+  const actor = { userId: "00000000-0000-0000-0000-0000000000aa", role: "OWNER" as const };
+  await db.profile.upsert({ where: { id: actor.userId }, update: {}, create: { id: actor.userId, fullName: "Traceability Gate", role: "OWNER" } });
+
   const conversation = await db.whatsappConversation.findUniqueOrThrow({ where: { waId: "919845077777" } });
   console.log("STEP 1 (verified above via curl): conversation", conversation.id, "unread:", conversation.unreadCount);
 
@@ -77,11 +82,11 @@ async function main() {
   );
 
   // STEP 5: Driver starts route, marks the stop delivered.
-  await routeStopsService.startRoute(route.id);
+  await routeStopsService.startRoute(route.id, actor);
   const orderAfterStart = await db.order.findUniqueOrThrow({ where: { id: order.id } });
   console.log("STEP 5a: route started, order status now:", orderAfterStart.status);
 
-  const deliveredStop = await routeStopsService.updateStopStatus({ stopId: route.stops[0].id, status: "DELIVERED" });
+  const deliveredStop = await routeStopsService.updateStopStatus({ stopId: route.stops[0].id, status: "DELIVERED", actor });
   console.log("STEP 5b: stop marked", deliveredStop.status, "deliveredAt:", deliveredStop.deliveredAt);
 
   const finalOrder = await db.order.findUniqueOrThrow({ where: { id: order.id } });

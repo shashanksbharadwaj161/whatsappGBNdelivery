@@ -1,10 +1,13 @@
 import { PlanFromLocation } from "@/components/driver/PlanFromLocation";
 import { DriverRouteView, type DriverStopView } from "@/components/driver/DriverRouteView";
 import { getDriverRouteForDate } from "@/lib/services/driver";
+import { getOptionalUser } from "@/lib/auth/guard";
 import { formatBusinessTime } from "@/lib/tz";
 
 export default async function DriverHomePage() {
-  const route = await getDriverRouteForDate();
+  const user = await getOptionalUser();
+  const actor = user?.role ? { userId: user.userId, role: user.role } : undefined;
+  const route = await getDriverRouteForDate(undefined, actor);
 
   if (!route) {
     return (

@@ -11,6 +11,7 @@ export const POST = withApiHandler(async (request: NextRequest, context: { param
   const body = schema.safeParse(await request.json());
   if (!body.success) throw new ValidationError("Choose valid orders and a valid starting location");
   if (user.role === "DRIVER" && body.data.additionalOrderIds.length) throw new ValidationError("Only the owner can add orders to an existing route");
-  const route = await reoptimizeRoute(routeId, body.data.additionalOrderIds, user.userId, body.data.currentLocation);
+  // reoptimizeRoute enforces driver ownership and claims an unassigned round.
+  const route = await reoptimizeRoute(routeId, body.data.additionalOrderIds, user, body.data.currentLocation);
   return NextResponse.json(route);
 });

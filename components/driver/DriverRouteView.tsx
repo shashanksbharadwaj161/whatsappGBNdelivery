@@ -69,7 +69,15 @@ export function DriverRouteView({
   const [justDelivered, setJustDelivered] = useState(false);
   const [showAllStops, setShowAllStops] = useState(false);
   const [selectedStopId, setSelectedStopId] = useState<string>();
+  const [liveLocation, setLiveLocation] = useState<{ lat: number; lng: number }>();
   const selectedStop = stops.find(stop => stop.id === selectedStopId);
+
+  // Navigate from the device's live position when we have it; otherwise omit
+  // origin and let Google Maps use the device location itself.
+  function navUrl(lat: number, lng: number) {
+    const origin = liveLocation ? `&origin=${liveLocation.lat},${liveLocation.lng}` : "";
+    return `https://www.google.com/maps/dir/?api=1${origin}&destination=${lat},${lng}&travelmode=driving`;
+  }
 
   const completedCount = stops.filter((s) => s.status !== "PENDING" && s.status !== "EN_ROUTE").length;
   const nextStop = stops.find((s) => s.status === "PENDING" || s.status === "EN_ROUTE");
@@ -139,7 +147,7 @@ export function DriverRouteView({
   return (
     <div className="relative">
       {/* Sticky progress header — stays visible while scrolling the stop list. */}
-      <div className="sticky top-0 z-30 -mx-4 mb-4 border-b border-border bg-bg/95 px-4 py-3 backdrop-blur">
+      <div className="sticky top-14 z-30 -mx-4 mb-4 border-b border-border bg-bg/95 px-4 py-3 backdrop-blur">
         <div className="flex items-center justify-between text-sm">
           <p className="font-medium text-ink">
             {completedCount} / {stops.length} deliveries
@@ -179,7 +187,7 @@ export function DriverRouteView({
 
             <div className="mt-4 grid grid-cols-3 gap-2">
               <a
-                href={`https://www.google.com/maps/dir/?api=1&destination=${nextStop.latitude},${nextStop.longitude}`}
+                href={navUrl(nextStop.latitude, nextStop.longitude)}
                 target="_blank"
                 rel="noreferrer"
                 className="flex flex-col items-center justify-center gap-1 rounded-xl border border-border bg-surface py-3 text-ink transition-transform active:scale-[0.97]"
@@ -217,13 +225,13 @@ export function DriverRouteView({
 
         {stops.length > 0 && (
           <div>
-            <LeafletMap center={mapCenter} markers={mapMarkers} fitToMarkers heightClassName="h-80" polyline={road} roadPath selectedMarkerId={selectedStopId} onMarkerSelect={setSelectedStopId} />
+            <LeafletMap center={mapCenter} markers={mapMarkers} fitToMarkers heightClassName="h-80" polyline={road} roadPath selectedMarkerId={selectedStopId} onMarkerSelect={setSelectedStopId} trackLiveLocation onLiveLocation={setLiveLocation} />
             <p className="mt-2 text-xs text-ink-muted">{road ? "OpenStreetMap road preview. Use Navigate for driving directions." : "Road preview unavailable. Tap a delivery pin or use Navigate."}</p>
             {selectedStop && <div className="mt-3 rounded-xl bg-surface-alt p-4">
               <p className="font-semibold">Stop {selectedStop.stopNumber} · {selectedStop.customerName}</p>
               <p className="mt-1 text-sm text-ink-muted">{selectedStop.address}</p>
               <p className="mt-1 text-sm">{selectedStop.quantity} · {ROUTE_STOP_STATUS_STYLE[selectedStop.status].label}</p>
-              <a className="mt-2 inline-flex min-h-11 items-center gap-2 font-semibold text-primary" target="_blank" rel="noreferrer" href={`https://www.google.com/maps/dir/?api=1&destination=${selectedStop.latitude},${selectedStop.longitude}&travelmode=driving`}><Navigation size={18} /> Navigate to this stop</a>
+              <a className="mt-2 inline-flex min-h-11 items-center gap-2 font-semibold text-primary" target="_blank" rel="noreferrer" href={navUrl(selectedStop.latitude, selectedStop.longitude)}><Navigation size={18} /> Navigate to this stop</a>
             </div>}
           </div>
         )}

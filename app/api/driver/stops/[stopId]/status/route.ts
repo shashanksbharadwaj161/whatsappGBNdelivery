@@ -18,7 +18,7 @@ export const POST = withApiHandler(async (request: NextRequest, context: { param
     stopId,
     status,
     failureReason: body.failureReason,
-    actorUserId: user.userId,
+    actor: user,
   });
 
   return NextResponse.json(stop);

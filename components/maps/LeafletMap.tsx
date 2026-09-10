@@ -27,6 +27,9 @@ interface LeafletMapProps {
   heightClassName?: string;
   selectedMarkerId?: string;
   onMarkerSelect?: (id: string) => void;
+  /** Continuously show the viewer's live GPS position while the map is open. */
+  trackLiveLocation?: boolean;
+  onLiveLocation?: (pos: { lat: number; lng: number }) => void;
 }
 const GREEN = "#1f4b36";
 function pinIcon(L: typeof LType, marker: LeafletMarker): LType.DivIcon {
@@ -39,21 +42,23 @@ function pinIcon(L: typeof LType, marker: LeafletMarker): LType.DivIcon {
 }
 
 export function LeafletMap({ center, zoom = 13, markers = [], polyline, draggableMarker,
-  fitToMarkers = false, roadPath = false, heightClassName = "h-80", selectedMarkerId, onMarkerSelect }: LeafletMapProps) {
+  fitToMarkers = false, roadPath = false, heightClassName = "h-80", selectedMarkerId, onMarkerSelect,
+  trackLiveLocation = false, onLiveLocation }: LeafletMapProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<LType.Map | null>(null);
   const layerRef = useRef<LType.LayerGroup | null>(null);
   const dragRef = useRef<LType.Marker | null>(null);
   const locationRef = useRef<LType.CircleMarker | null>(null);
+  const liveRef = useRef<LType.CircleMarker | null>(null);
   const markerRefs = useRef(new Map<string, LType.Marker>());
-  const callbacks = useRef({ onChange: draggableMarker?.onChange, onMarkerSelect });
+  const callbacks = useRef({ onChange: draggableMarker?.onChange, onMarkerSelect, onLiveLocation });
   const initial = useRef({ center, zoom, draggable: Boolean(draggableMarker) });
   const fitted = useRef(false);
   const [ready, setReady] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const [locating, setLocating] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
-  useEffect(() => { callbacks.current = { onChange: draggableMarker?.onChange, onMarkerSelect }; });
+  useEffect(() => { callbacks.current = { onChange: draggableMarker?.onChange, onMarkerSelect, onLiveLocation }; });
 
   useEffect(() => {
     let cancelled = false;
@@ -121,6 +126,36 @@ export function LeafletMap({ center, zoom = 13, markers = [], polyline, draggabl
     dragRef.current?.setLatLng(position);
     mapRef.current?.panTo(position);
   }, [ready, draggableMarker?.lat, draggableMarker?.lng]);
+  // Live GPS marker: follow the viewer's position while the map is open,
+  // and release the geolocation watch on unmount so it never leaks.
+  useEffect(() => {
+    if (!ready || !trackLiveLocation) return;
+    let cancelled = false;
+    let watchId: number | null = null;
+    void import("leaflet").then(({ default: L }) => {
+      if (cancelled) return;
+      if (!navigator.geolocation) { setNotice("Your browser does not support location, so your live position can't be shown."); return; }
+      watchId = navigator.geolocation.watchPosition(
+        ({ coords }) => {
+          const map = mapRef.current;
+          if (!map) return;
+          const pos: [number, number] = [coords.latitude, coords.longitude];
+          if (liveRef.current) liveRef.current.setLatLng(pos);
+          else liveRef.current = L.circleMarker(pos, { radius: 8, color: "white", weight: 3, fillColor: "#2563eb", fillOpacity: 1 }).addTo(map).bindPopup("You are here");
+          callbacks.current.onLiveLocation?.({ lat: coords.latitude, lng: coords.longitude });
+        },
+        error => { if (error.code === 1) setNotice("Location access is off. Allow it in your browser settings to see your live position on the map."); },
+        { enableHighAccuracy: true, timeout: 20000, maximumAge: 10000 }
+      );
+    });
+    return () => {
+      cancelled = true;
+      if (watchId !== null) navigator.geolocation.clearWatch(watchId);
+      liveRef.current?.remove();
+      liveRef.current = null;
+    };
+  }, [ready, trackLiveLocation]);
+
   useEffect(() => {
     if (!expanded) return;
     const previous = document.body.style.overflow;
