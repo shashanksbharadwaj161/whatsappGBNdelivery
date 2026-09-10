@@ -63,6 +63,8 @@ export default async function RoutesPage({
         {activeRoutes.length ? "Plan another route" : "Plan a delivery route"}
       </p>
       <RouteOptimizerPanel
+        key={today}
+        deliveryDate={today}
         orders={orders}
         preselectedIds={preselectedIds}
         defaultStart={{ lat: defaultStart.latitude, lng: defaultStart.longitude, label: defaultStart.label }}

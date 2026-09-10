@@ -53,14 +53,16 @@ const STEPPER_TONE: Record<DriverStopView["status"], string> = {
 export function DriverRouteView({
   routeId,
   routeStatus,
+  awaitingDriverLocation = false,
   stops,
 }: {
   routeId: string;
+  awaitingDriverLocation?: boolean;
   routeStatus: "PLANNED" | "IN_PROGRESS" | "COMPLETED" | "CANCELLED";
   stops: DriverStopView[];
 }) {
   const router = useRouter();
-  const road = useRoadGeometry(routeId);
+  const road = useRoadGeometry(awaitingDriverLocation ? undefined : routeId);
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [mode, setMode] = useState<Mode>("idle");
@@ -151,15 +153,16 @@ export function DriverRouteView({
 
       <div className="space-y-4 pb-36">
         {(routeStatus === "PLANNED" || routeStatus === "IN_PROGRESS") && <PlanFromLocation routeId={routeId} />}
+        {awaitingDriverLocation && <p className="rounded-lg bg-surface-alt p-4 text-sm">Your WhatsApp delivery stops are ready. Allow location access above to calculate the visiting order before starting.</p>}
         {error && <p role="alert" className="rounded-lg bg-status-cancelled-soft px-3 py-2 text-sm text-status-cancelled">{error}</p>}
 
-        {routeStatus === "PLANNED" && (
+        {routeStatus === "PLANNED" && !awaitingDriverLocation && (
           <div className="rounded-xl border border-border bg-surface p-4 text-center">
             <p className="mb-3 text-sm text-ink-muted">
-              {stops.length} stop{stops.length === 1 ? "" : "s"} planned for today.
+              {stops.length} stop{stops.length === 1 ? "" : "s"} ready for this round.
             </p>
             <Button size="xl" className="w-full" disabled={pending} onClick={handleStart}>
-              Start today&rsquo;s route
+              Start delivery round
             </Button>
           </div>
         )}

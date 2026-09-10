@@ -21,7 +21,9 @@ export function RouteOptimizerPanel({
   orders,
   preselectedIds,
   defaultStart,
+  deliveryDate = todayBusinessDateString(),
 }: {
+  deliveryDate?: string;
   orders: RoutableOrder[];
   preselectedIds: string[];
   defaultStart: { lat: number; lng: number; label: string };
@@ -55,7 +57,7 @@ export function RouteOptimizerPanel({
     setLoading(true);
     setError(null);
     try {
-      const startDateTime = businessDateAndTimeToUtc(todayBusinessDateString(), startTime);
+      const startDateTime = businessDateAndTimeToUtc(deliveryDate, startTime);
 
       const res = await fetch("/api/routes/optimize", {
         method: "POST",
@@ -120,7 +122,7 @@ export function RouteOptimizerPanel({
                 <span className="text-ink-muted">{o.quantity}</span>
               </label>
             ))}
-            {orders.length === 0 && <p className="px-3 py-6 text-center text-sm text-ink-muted">No confirmed, unrouted orders for today.</p>}
+            {orders.length === 0 && <p className="px-3 py-6 text-center text-sm text-ink-muted">No confirmed, unrouted orders for this date.</p>}
           </div>
         </div>
 

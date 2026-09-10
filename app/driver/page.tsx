@@ -28,5 +28,5 @@ export default async function DriverHomePage() {
     longitude: stop.longitudeSnapshot,
   }));
 
-  return <DriverRouteView routeId={route.id} routeStatus={route.status} stops={stops} />;
+  return <DriverRouteView awaitingDriverLocation={route.awaitingDriverLocation} routeId={route.id} routeStatus={route.status} stops={stops} />;
 }
